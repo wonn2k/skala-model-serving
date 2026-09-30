@@ -16,7 +16,7 @@
 | 예측 대상: 다음날 종가 `Close` | 다음날 **도착 여객 수** `Arrivals` (명) | `data/features.py`, `schemas.py` |
 | 보조 피처: 거래량 `Volume` | 같은 날 **출발 여객 수** `Departures` (명) | `data/features.py` |
 | 입력 시퀀스: 최근 20거래일 | 최근 **20일** (SEQ_LEN, 변경 없음) | `data/features.py` |
-| 데이터 공급: CSV 업로드 | 한국공항공사 일별 여객 통계 CSV 업로드 (`Date,Arrivals,Departures`) | `routers/data.py` |
+| 데이터 공급: CSV 업로드 | 한국공항공사 **제주공항** 일별 여객 CSV 업로드 (`Date,Arrivals,Departures`) | `routers/data.py`, `data/README.md` |
 | 배포 게이트: RMSE ≤ $4.00 | RMSE ≤ **2,700명** | `train_and_register.py` `RMSE_GATE` |
 | 드리프트 임계값: RMSE > $4.00 | RMSE > **2,700명** (최근 21일 윈도우) | `monitoring/drift_detector.py` |
 | 시뮬레이션 고정 거래량 1,200,000 | 고정 출발 여객 **37,000명** | `routers/predict.py` `SIMULATED_DEPARTURES` |
@@ -32,9 +32,11 @@
 
 CSV 형식: `Date,Arrivals,Departures` (일별, 단위: 명, UTF-8, 최소 41행).
 
-- `data/sample_airport_arrivals.csv`는 **형식 확인용 합성 데이터**입니다(3년치, 요일·계절
-  패턴 포함, 일평균 약 37,000명). 실제 분석·발표에는 팀이 선정한 한국공항공사 데이터를
-  같은 컬럼 형식으로 가공해 업로드하세요 (출처·가공 방법: `docs/PROJECT_PLAN.md` "데이터").
+- `data/jeju_airport_arrivals.csv`는 **한국공항공사 제주공항 일별 여객 실데이터**
+  (2023-01-01 ~ 2025-10-31, 1,035일, 일평균 도착 약 37,200명)입니다. 원자료·가공 규칙·기초
+  통계는 [`data/README.md`](data/README.md), 변환 스크립트는 `scripts/prepare_jeju_data.py`.
+- `data/jeju_drift_batch_41rows.csv`는 폭설 결항일(2025-02-07, 6,088명)이 포함된 41일 실데이터
+  슬라이스로, Day3 드리프트 주입 시연에 사용합니다.
 - 서버를 띄운 뒤 대시보드(`http://localhost:8000/`)의 업로드 카드에서 파일을 올리면
   `data/uploads/`에 타임스탬프 파일명으로 쌓이고, 학습·시뮬레이션 코드는 항상 **가장
   최근에 업로드된 파일**을 사용합니다(`data/storage.py`의 `latest_upload()`).
@@ -62,11 +64,15 @@ Day1~3 내내 재사용합니다.
 ├── requirements.txt
 ├── docs/                            # 팀 기획서 초안·협업 규칙·API 명세 (조별 프로젝트 추가분)
 ├── data/
-│   ├── sample_airport_arrivals.csv  # 형식 확인용 합성 샘플 (Date,Arrivals,Departures)
+│   ├── README.md                    # 데이터 출처·컬럼 매핑·가공 규칙·기초 통계
+│   ├── raw/                         # 한국공항공사 제주공항 원자료 (UTF-8 재인코딩)
+│   ├── jeju_airport_arrivals.csv    # 학습용 실데이터 (Date,Arrivals,Departures · 1,035일)
+│   ├── jeju_drift_batch_41rows.csv  # Day3 드리프트 주입용 41일 실데이터 배치
 │   ├── storage.py                   # 업로드된 CSV 중 최신 파일을 찾는 latest_upload()
 │   ├── uploads/                     # 업로드된 CSV가 쌓이는 곳 (시작 시 비어 있음, git 제외)
 │   └── features.py                  # 시퀀스 빌더(SEQ_LEN=20) + AirportScaler (전 Day 공용)
 ├── scripts/
+│   ├── prepare_jeju_data.py         # 원자료 -> 업로드 형식 변환 (결측일 보간)
 │   ├── train_baseline_v1.py         # Day1 사전 준비: MLflow 없이 로컬 baseline LSTM 생성
 │   └── simulate_drift.py            # Day3: 정상/드리프트 배치 생성 + 서버로 주입
 └── serving_app/
@@ -96,7 +102,7 @@ pip install -r requirements.txt
 
 # --- Day1 ---
 uvicorn serving_app.main:app --host 0.0.0.0 --port 8000   # http://localhost:8000/ 대시보드, /docs 에서 API 확인
-# 대시보드 업로드 카드에서 data/sample_airport_arrivals.csv(또는 실제 데이터)를 업로드한 뒤, 별도 터미널에서:
+# 대시보드 업로드 카드에서 data/jeju_airport_arrivals.csv(또는 실제 데이터)를 업로드한 뒤, 별도 터미널에서:
 python scripts/train_baseline_v1.py                        # 로컬 baseline LSTM + scaler.pkl 생성
 # LOADING_MODE=eager uvicorn serving_app.main:app --reload # Eager 방식과 시작 시간 비교
 

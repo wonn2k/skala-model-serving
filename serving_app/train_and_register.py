@@ -9,7 +9,7 @@ Day3: 드리프트 감지 후 Production 가중치에서 이어서 학습하는 
        10 epoch만 fine-tuning (처음부터 다시 학습하지 않음 - 21일치로는 스크래치 학습이 불안정)
 
 실행:
-    (대시보드에서 공항 도착 여객 CSV를 먼저 업로드하세요 - data/sample_airport_arrivals.csv가 예시입니다)
+    (대시보드에서 공항 도착 여객 CSV를 먼저 업로드하세요 - data/jeju_airport_arrivals.csv가 예시입니다)
     python scripts/train_baseline_v1.py     # 최초 1회 (scaler.pkl 생성)
     python serving_app/train_and_register.py
 """
