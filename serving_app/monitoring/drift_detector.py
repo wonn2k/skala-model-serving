@@ -2,10 +2,11 @@
 Day3: RMSE 기반 데이터 드리프트 판정.
 
 판단 기준 - 최근 WINDOW_SIZE(21)건의 (predicted, actual) 쌍으로 RMSE를 계산해
-RMSE_THRESHOLD($4.00)와 비교한다. 너무 짧은 윈도우는 노이즈에 민감하고,
-너무 긴 윈도우는 드리프트 반응이 느려진다 - 21은 "최근 한 달 거래일" 근사치로 정한 절충점.
+RMSE_THRESHOLD(2,700명)와 비교한다. 너무 짧은 윈도우는 노이즈에 민감하고,
+너무 긴 윈도우는 드리프트 반응이 느려진다 - 21은 "최근 3주(21일)" 기준으로 정한 절충점.
+(임계값은 배포 게이트 RMSE_GATE와 같은 값으로 두어, "게이트를 못 넘는 수준의 오차 = 드리프트"로 해석한다.)
 """
-RMSE_THRESHOLD = 4.00
+RMSE_THRESHOLD = 2700.0  # 명 - serving_app/train_and_register.py의 RMSE_GATE와 동일
 WINDOW_SIZE = 21  # 최근 21건 기준
 
 

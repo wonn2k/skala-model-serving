@@ -1,5 +1,5 @@
 """
-HAIC 데이터를 LSTM 입력용 시퀀스로 변환하는 공용 유틸리티.
+공항 도착 여객 데이터를 LSTM 입력용 시퀀스로 변환하는 공용 유틸리티.
 
 Day1 baseline 학습(scripts/train_baseline_v1.py), Day2 MLflow 학습
 (serving_app/train_and_register.py), Day3 fine-tuning 재학습
@@ -7,32 +7,36 @@ Day1 baseline 학습(scripts/train_baseline_v1.py), Day2 MLflow 학습
 한 곳에서만 관리해야 "서빙 시점 입력"과 "학습 시점 입력"이 어긋나는 실무 사고를
 방지할 수 있습니다.
 
-입력 시퀀스: 최근 SEQ_LEN(20)거래일의 (close, volume)
-타깃: 그다음 거래일의 close
+입력 시퀀스: 최근 SEQ_LEN(20)일의 (arrivals=도착 여객 수, departures=출발 여객 수)
+타깃: 그다음 날의 arrivals(도착 여객 수)
+
+[도메인 매핑] HAIC 템플릿 -> 공항 도착 여객 예측
+    Close(종가)   -> Arrivals(일별 도착 여객 수, 명)
+    Volume(거래량) -> Departures(일별 출발 여객 수, 명)
 """
 import csv
 import pickle
 
-SEQ_LEN = 20  # LSTM 입력 윈도우 길이 (거래일 수) - 약 1개월치 거래일
+SEQ_LEN = 20  # LSTM 입력 윈도우 길이 (일 수) - 약 3주치 일별 데이터
 
 
-def load_rows(csv_path: str = "data/haic_prices.csv") -> list[dict]:
+def load_rows(csv_path: str = "data/airport_arrivals.csv") -> list[dict]:
     with open(csv_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = [
             {
                 "Date": r["Date"],
-                "Close": float(r["Close"]),
-                "Volume": float(r["Volume"]),
+                "Arrivals": float(r["Arrivals"]),
+                "Departures": float(r["Departures"]),
             }
             for r in reader
         ]
     return rows
 
 
-class HAICScaler:
+class AirportScaler:
     """
-    close/volume을 각각 [0, 1] 범위로 정규화하는 min-max 스케일러.
+    arrivals/departures를 각각 [0, 1] 범위로 정규화하는 min-max 스케일러.
 
     LSTM은 스케일에 민감하기 때문에(트리 기반 모델과 달리) 반드시 정규화가 필요합니다.
     Day1에서 base 데이터로 한 번 fit한 뒤 serving_app/models/scaler.pkl로 저장해두고,
@@ -42,14 +46,14 @@ class HAICScaler:
     """
 
     def __init__(self):
-        self.close_min = self.close_max = None
-        self.volume_min = self.volume_max = None
+        self.arrivals_min = self.arrivals_max = None
+        self.departures_min = self.departures_max = None
 
-    def fit(self, rows: list[dict]) -> "HAICScaler":
-        closes = [r["Close"] for r in rows]
-        volumes = [r["Volume"] for r in rows]
-        self.close_min, self.close_max = min(closes), max(closes)
-        self.volume_min, self.volume_max = min(volumes), max(volumes)
+    def fit(self, rows: list[dict]) -> "AirportScaler":
+        arrivals = [r["Arrivals"] for r in rows]
+        departures = [r["Departures"] for r in rows]
+        self.arrivals_min, self.arrivals_max = min(arrivals), max(arrivals)
+        self.departures_min, self.departures_max = min(departures), max(departures)
         return self
 
     def _scale(self, value: float, lo: float, hi: float) -> float:
@@ -60,47 +64,47 @@ class HAICScaler:
     def _unscale(self, value: float, lo: float, hi: float) -> float:
         return value * (hi - lo) + lo
 
-    def transform_point(self, close: float, volume: float) -> list[float]:
+    def transform_point(self, arrivals: float, departures: float) -> list[float]:
         return [
-            self._scale(close, self.close_min, self.close_max),
-            self._scale(volume, self.volume_min, self.volume_max),
+            self._scale(arrivals, self.arrivals_min, self.arrivals_max),
+            self._scale(departures, self.departures_min, self.departures_max),
         ]
 
-    def scale_close(self, close: float) -> float:
-        """타깃(다음날 종가)을 학습용으로 정규화. 입력 시퀀스와 같은 스케일을 써야
+    def scale_arrivals(self, arrivals: float) -> float:
+        """타깃(다음날 도착 여객 수)을 학습용으로 정규화. 입력 시퀀스와 같은 스케일을 써야
         손실(loss)이 과도하게 커지지 않고 학습이 안정적으로 수렴한다."""
-        return self._scale(close, self.close_min, self.close_max)
+        return self._scale(arrivals, self.arrivals_min, self.arrivals_max)
 
-    def inverse_close(self, scaled_close: float) -> float:
-        """모델이 뱉은 정규화된 예측값을 실제 달러 단위 종가로 되돌린다."""
-        return self._unscale(scaled_close, self.close_min, self.close_max)
+    def inverse_arrivals(self, scaled_arrivals: float) -> float:
+        """모델이 뱉은 정규화된 예측값을 실제 명(名) 단위 도착 여객 수로 되돌린다."""
+        return self._unscale(scaled_arrivals, self.arrivals_min, self.arrivals_max)
 
     def save(self, path: str = "serving_app/models/scaler.pkl"):
         with open(path, "wb") as f:
             pickle.dump(self.__dict__, f)
 
     @classmethod
-    def load(cls, path: str = "serving_app/models/scaler.pkl") -> "HAICScaler":
+    def load(cls, path: str = "serving_app/models/scaler.pkl") -> "AirportScaler":
         scaler = cls()
         with open(path, "rb") as f:
             scaler.__dict__.update(pickle.load(f))
         return scaler
 
 
-def build_sequences(rows: list[dict], scaler: HAICScaler, seq_len: int = SEQ_LEN):
+def build_sequences(rows: list[dict], scaler: AirportScaler, seq_len: int = SEQ_LEN):
     """
-    rows(시간순 OHLCV)에서 (SEQ_LEN, 2) 크기의 정규화된 입력 시퀀스와
-    다음날 종가(정규화 전 실값) 타깃을 만든다.
+    rows(시간순 일별 데이터)에서 (SEQ_LEN, 2) 크기의 정규화된 입력 시퀀스와
+    다음날 도착 여객 수(정규화 전 실값) 타깃을 만든다.
 
-    반환: X (n_samples, seq_len, 2), y (n_samples,) - y는 스케일 안 된 실제 종가
+    반환: X (n_samples, seq_len, 2), y (n_samples,) - y는 스케일 안 된 실제 도착 여객 수
     """
-    scaled_points = [scaler.transform_point(r["Close"], r["Volume"]) for r in rows]
-    closes = [r["Close"] for r in rows]
+    scaled_points = [scaler.transform_point(r["Arrivals"], r["Departures"]) for r in rows]
+    arrivals = [r["Arrivals"] for r in rows]
 
     X, y = [], []
     for i in range(len(rows) - seq_len):
         X.append(scaled_points[i : i + seq_len])
-        y.append(closes[i + seq_len])
+        y.append(arrivals[i + seq_len])
     return X, y
 
 

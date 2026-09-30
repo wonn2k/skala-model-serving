@@ -2,7 +2,7 @@
 FastAPI 앱 진입점.
 
 Day1: app 생성, 라우터(predict, health) 등록, startup 이벤트에서 로딩 모드에 따라 모델 준비
-Day2: data 라우터 등록 (HAIC 데이터 업로드)
+Day2: data 라우터 등록 (공항 도착 여객 데이터 업로드)
 Day3: "aiops" 로거를 logs/aiops.log 파일로 연결(로깅 설정) + logs 라우터(로그 파일 조회) 등록
 
 정적 대시보드: serving_app/static/index.html 이 /health · /predict · /predict/batch-test ·
@@ -32,11 +32,11 @@ if not _aiops_logger.handlers:
     _aiops_logger.addHandler(_handler)
     _aiops_logger.addHandler(logging.StreamHandler())  # 터미널에서도 동일하게 확인 가능
 
-app = FastAPI(title="HAIC Serving & AIOps")
+app = FastAPI(title="Airport Arrivals Serving & AIOps")
 
 app.include_router(predict.router)
 app.include_router(health.router)
-app.include_router(data.router)  # HAIC 데이터 업로드
+app.include_router(data.router)  # 공항 도착 여객 데이터 업로드
 app.include_router(logs.router)  # 대시보드: 재학습 로그 파일 조회
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")

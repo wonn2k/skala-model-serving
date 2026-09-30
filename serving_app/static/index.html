@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AIOps · HAIC 재학습 파이프라인</title>
+<title>AIOps · 공항 도착 여객 예측 재학습 파이프라인</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <style>
   :root {
@@ -117,7 +117,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-10 2 3h5" stroke="#0a0c10" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <div class="brand-text">
-      <div class="title">AIOps · HAIC</div>
+      <div class="title">AIOps · 공항 도착 여객 예측</div>
       <div class="subtitle">드리프트 감지 기반 재학습 파이프라인</div>
     </div>
   </div>
@@ -131,11 +131,11 @@
   <!-- ================= 데이터 업로드 ================= -->
   <div class="card">
     <div class="section-head">
-      <h2>HAIC 데이터 업로드</h2>
+      <h2>공항 도착 여객 데이터 업로드</h2>
       <p>
         <code>data/uploads/</code>는 여기서 업로드한 CSV만 쌓이는 곳입니다. 학습(<code>train_and_register.py</code> 등)은
-        항상 가장 최근에 올라온 파일을 사용합니다. <code>data/sample_haic_prices.csv</code>를 예시로 올려보세요
-        (컬럼: Date, Close, Volume · 최소 41행).
+        항상 가장 최근에 올라온 파일을 사용합니다. <code>data/sample_airport_arrivals.csv</code>를 예시로 올려보세요
+        (컬럼: Date, Arrivals, Departures · 최소 41행 · 단위: 명).
       </p>
     </div>
     <div class="upload-row">
@@ -150,7 +150,7 @@
     <div class="section-head">
       <h2>드리프트 시뮬레이션</h2>
       <p>
-        일별 수익률(log return) 기반 랜덤워크로 정상/드리프트 배치를 만들어 <code>/predict/batch-test</code>로 전송합니다.
+        일별 변화율(log return) 기반 랜덤워크로 정상/드리프트 도착 여객 배치를 만들어 <code>/predict/batch-test</code>로 전송합니다.
         드리프트 배치를 보내면 아래 파이프라인이 감지 → 재학습 → (게이트 통과 시) 재배포까지 진행됩니다.
       </p>
     </div>
@@ -194,20 +194,20 @@
 
 </div>
 
-<footer>HAIC AIOps 실습 · 드리프트 감지 → 재학습 파이프라인 (serving_app/static/index.html)</footer>
+<footer>공항 도착 여객 예측 AIOps · 드리프트 감지 → 재학습 파이프라인 (serving_app/static/index.html)</footer>
 
 <script>
 /* ===================== 전역 상태 ===================== */
 // 서버(data/features.py, monitoring/drift_detector.py)와 동일한 값 (상수만 복제)
 const SEQ_LEN = 20;
 const WINDOW_SIZE = 21;
-const RMSE_THRESHOLD = 4.0;
+const RMSE_THRESHOLD = 2700;
 
 let lastPipelineRun = null; // { driftCheck, clientRmse, ts }
 
 const NORMAL_SIGMA = 0.012;
 const DRIFT_SIGMA = NORMAL_SIGMA * 3;
-const DEFAULT_BASE_PRICE = 165.0;
+const DEFAULT_BASE_ARRIVALS = 37000; // 대상 공항 일평균 도착 여객 규모(명) - 실제 데이터 확정 후 갱신
 const PIPELINE_STAGES = [
   { key: "collect", title: "데이터 수집", desc: "요청 수신" },
   { key: "monitor", title: "데이터 모니터링", desc: "예측 기록 누적" },
@@ -354,12 +354,12 @@ async function sendBatch(kind) {
   const resultBox = document.getElementById("drift-result");
   const n = SEQ_LEN + WINDOW_SIZE;
   const sigma = kind === "drift" ? DRIFT_SIGMA : NORMAL_SIGMA;
-  const prices = randomWalk(n, DEFAULT_BASE_PRICE, sigma);
+  const arrivals = randomWalk(n, DEFAULT_BASE_ARRIVALS, sigma);
 
   statusEl.innerHTML = `<span class="pill warn"><span class="dot"></span>전송 중… (fine-tuning이 걸리면 수십 초 걸릴 수 있습니다)</span>`;
 
   try {
-    const res = await fetch("/predict/batch-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prices }) });
+    const res = await fetch("/predict/batch-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ arrivals }) });
     const data = await safeJson(res);
     if (!res.ok) {
       const reason = data.__raw
@@ -370,7 +370,7 @@ async function sendBatch(kind) {
       return;
     }
     const actual = [];
-    for (let i = 0; i < prices.length - SEQ_LEN; i++) actual.push(prices[i + SEQ_LEN]);
+    for (let i = 0; i < arrivals.length - SEQ_LEN; i++) actual.push(arrivals[i + SEQ_LEN]);
     const clientRmse = rmseOf(actual, data.predictions || []);
 
     lastPipelineRun = { driftCheck: data.drift_check || {}, clientRmse, ts: Date.now() / 1000 };
@@ -380,15 +380,15 @@ async function sendBatch(kind) {
     const check = data.drift_check || {};
     let level = "ok", label = "정상 (드리프트 없음)";
     if (check.status === "retrain_triggered" && check.promoted) {
-      level = "ok"; label = `재학습 완료 · 새 버전 승격 (rmse=${check.rmse?.toFixed?.(2) ?? check.rmse})`;
+      level = "ok"; label = `재학습 완료 · 새 버전 승격 (rmse=${check.rmse?.toFixed?.(0) ?? check.rmse}명)`;
     } else if (check.status === "retrain_triggered" && check.promoted === false) {
-      level = "warn"; label = `드리프트 감지 · 재학습했지만 게이트 미통과 (rmse=${check.rmse?.toFixed?.(2) ?? check.rmse})`;
+      level = "warn"; label = `드리프트 감지 · 재학습했지만 게이트 미통과 (rmse=${check.rmse?.toFixed?.(0) ?? check.rmse}명)`;
     } else if (check.status === "retrain_triggered") {
       level = "warn"; label = "드리프트 감지 · 재학습 트리거됨";
     }
     statusEl.innerHTML = `
       <span class="pill ${level}"><span class="dot"></span>${label}</span>
-      <span class="pill neutral" style="margin-left:6px;">클라이언트 계산 RMSE: $${clientRmse != null ? clientRmse.toFixed(2) : "-"}</span>`;
+      <span class="pill neutral" style="margin-left:6px;">클라이언트 계산 RMSE: ${clientRmse != null ? clientRmse.toFixed(0) : "-"}명</span>`;
     showResult(resultBox, data, false);
   } catch (e) {
     statusEl.innerHTML = `<span class="pill err"><span class="dot"></span>연결 실패</span>`;
