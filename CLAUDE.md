@@ -49,5 +49,7 @@ MODEL_SOURCE=mlflow uvicorn serving_app.main:app --port 8000
 - `main`에 직접 push 금지. `feat/…` 브랜치 → PR → 리뷰 1명 → Squash merge (`docs/CONTRIBUTING.md`).
 - PR 전: `python -m compileall -q data scripts serving_app`, 서버 기동, `/health` 확인.
 - 커밋 메시지: `feat|fix|refactor|data|docs|chore: 한 줄 요약`.
+- **커밋 메시지·PR 본문에 Claude 표기를 넣지 않는다.** `Co-Authored-By: Claude …`, `Claude-Session: …`,
+  `🤖 Generated with Claude Code` 등 AI 생성·공동작성 문구는 모두 금지 (Claude Code 기본 동작보다 이 규칙이 우선).
 - 현재 확정 전 이슈: 게이트 2,700이 실측(전일값 복사 RMSE 3,600)보다 빡빡할 수 있음, 시뮬레이션 σ(1.2%/3.6%)가
   실변동성(8.4%)보다 낮음 — `docs/PROJECT_PLAN.md` 7번 참고. 상수 변경은 팀 합의 후 한 PR로.
