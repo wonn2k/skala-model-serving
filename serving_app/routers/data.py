@@ -1,5 +1,5 @@
 """
-HAIC 가상 데이터 업로드 - data/generate_haic_data.py로 자동 생성하던 방식을 대체합니다.
+공항 도착 여객 데이터 업로드 - 데이터를 스크립트로 자동 생성하던 방식을 대체합니다.
 
 /data 폴더는 이 라우터로 업로드된 CSV만 쌓이는 곳입니다(data/uploads/). 여러 번
 업로드하면 계속 쌓이고, 학습(train_and_register.py, fine_tune 등)은 항상 가장
@@ -20,7 +20,7 @@ from serving_app.monitoring.drift_detector import WINDOW_SIZE
 
 router = APIRouter(prefix="/data")
 
-REQUIRED_COLUMNS = {"Date", "Close", "Volume"}
+REQUIRED_COLUMNS = {"Date", "Arrivals", "Departures"}
 MIN_ROWS = SEQ_LEN + WINDOW_SIZE  # 시퀀스 구성 + 드리프트 판정 윈도우에 필요한 최소 행 수
 
 
@@ -40,7 +40,7 @@ async def upload(file: UploadFile = File(...)):
         raise HTTPException(400, f"최소 {MIN_ROWS}행 이상의 데이터가 필요합니다.")
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    dest = os.path.join(UPLOAD_DIR, f"haic_{int(time.time())}.csv")
+    dest = os.path.join(UPLOAD_DIR, f"airport_{int(time.time())}.csv")
     with open(dest, "w", encoding="utf-8", newline="") as f:
         f.write(text)
 
@@ -55,13 +55,13 @@ def status():
         return {"exists": False}
 
     rows = load_rows(path)
-    closes = [r["Close"] for r in rows]
+    arrivals = [r["Arrivals"] for r in rows]
     return {
         "exists": True,
         "filename": os.path.basename(path),
         "rows": len(rows),
         "start_date": rows[0]["Date"],
         "end_date": rows[-1]["Date"],
-        "min_close": min(closes),
-        "max_close": max(closes),
+        "min_arrivals": min(arrivals),
+        "max_arrivals": max(arrivals),
     }
