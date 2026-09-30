@@ -52,12 +52,13 @@ docs: fill plan section ① pain point
 
 ## 5. 로컬 실행 공통 규칙
 
-- Python **3.11** (Dockerfile과 동일). 가상환경은 프로젝트 루트의 `.venv/`로 통일한다 (.gitignore 처리됨).
+- Python **3.11 또는 3.12** (Dockerfile은 3.11). 3.13은 tensorflow 휠 호환이 불안하고 3.10은 numpy 2.4가 지원하지 않는다.
+  가상환경은 프로젝트 루트의 `.venv/`로 통일한다 (.gitignore 처리됨). `py -0`으로 설치된 버전을 확인한 뒤 있는 것을 쓴다.
 
   ```bash
   # macOS / Linux
   git clone https://github.com/wonn2k/skala-model-serving.git && cd skala-model-serving
-  python3.11 -m venv .venv
+  python3.12 -m venv .venv          # 또는 python3.11
   source .venv/bin/activate
   pip install --upgrade pip
   pip install -r requirements.txt
@@ -65,12 +66,13 @@ docs: fill plan section ① pain point
   ```powershell
   # Windows (PowerShell)
   git clone https://github.com/wonn2k/skala-model-serving.git; cd skala-model-serving
-  py -3.11 -m venv .venv
-  .venv\Scripts\Activate.ps1      # 실행 정책 오류 시: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+  py -3.12 -m venv .venv            # 또는 py -3.11
+  .\.venv\Scripts\Activate.ps1     # 실행 정책 오류 시: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
   python -m pip install --upgrade pip
   pip install -r requirements.txt
   ```
   tensorflow 설치에 수 분 걸릴 수 있다. VS Code에서는 `Python: Select Interpreter`로 `.venv`를 선택한다.
+  레포가 OneDrive 동기화 폴더 안에 있으면 `.venv`(약 2GB, 수만 파일)가 동기화되어 느려질 수 있다 → 가능하면 OneDrive 밖(`C:\dev\…`)에 clone.
 - 항상 **프로젝트 루트**에서 실행 (`serving_app/`, `scripts/` 안에서 실행하면 상대경로가 깨짐).
 - 포트는 **8000** 으로 통일 (대시보드 `http://localhost:8000/`).
 - 환경변수: `LOADING_MODE=lazy|eager`, `MODEL_SOURCE=local|mlflow`.
