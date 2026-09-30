@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# 학습 산출물 (스크립트가 생성 - 커밋하지 않음)
+serving_app/models/*.keras
+serving_app/models/*.pkl
+!serving_app/models/.gitkeep
+
+# MLflow 로컬 트래킹 (sqlite + artifacts)
+mlruns/
+mlartifacts/
+mlflow.db
+
+# 런타임 로그 / 업로드 데이터
+logs/
+data/uploads/*
+!data/uploads/.gitkeep
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
