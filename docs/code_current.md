@@ -72,8 +72,8 @@
 
 - `GET /health`, `POST /predict`는 스켈레톤 그대로 완성되어 있다.
 - `/predict` 입력은 최근 20일 시퀀스(`arrivals`, `departures`)이며 길이가 20이 아니거나 값이 음수이면 422로 거부한다.
-- `model_loader._load_from_mlflow()`는 TODO 1 상태다. `MODEL_SOURCE=mlflow`로 모델을 불러오면 `NotImplementedError`가 난다.
-- 재배포 후 서빙 모델 반영: `_model_cache`가 자동으로 갱신되지 않는다 (미해결, 수업 가이드 부록 1의 6번).
+- `model_loader._load_from_mlflow()`: 이 브랜치(`exp/drift-anomaly`)에서 이식됨. `models:/Airport_Arrivals_Predictor/Production` 로드, 버전 문자열 `production`.
+- `model_loader.reset_cache()` 추가: 승격·롤백 뒤 `retrain_trigger`가 호출해 다음 `get_model()`이 새 Production을 다시 읽는다. 실험에서 승격 → 롤백 뒤 같은 프로세스에서 v2 → v1 전환 확인.
 
 ### 측정값
 
@@ -105,6 +105,7 @@
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | 스켈레톤을 공항 도메인으로 치환한 상태를 기록 | 해당 없음 | main
+- 2026-10-01 | 실험 | TODO 1 이식, `reset_cache()` 추가 | 승격·롤백 후 캐시 갱신 확인 (in-process) | exp/drift-anomaly
 
 ---
 
@@ -188,39 +189,49 @@
 - **역할**: 예측·실제 쌍을 쌓아 오차를 감시하고, 임계값을 넘으면 알림 → 최근 데이터로 fine-tuning → 게이트 재검증 → 재배포까지 사람 없이 잇는다.
 - **구성 요소**
   - `routers/predict.py` `batch_test()` (**TODO 3**): `BatchTestRequest.arrivals` 41개 → 길이 20 슬라이딩 윈도우 21개 → 각 윈도우로 예측(출발 여객은 `SIMULATED_DEPARTURES` 고정) → `recent_predictions`에 `{"predicted", "actual"}` 누적(최근 21건 유지) → `check_and_trigger()` → `BatchTestResponse(predictions, drift_check)`.
-  - `drift_detector.py`: `compute_rmse(recent_predictions)` (**TODO 2**), `is_drift()` = RMSE > `RMSE_THRESHOLD`(2,700명), `WINDOW_SIZE = 21`.
-  - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): 드리프트면 `[WARN]` → `latest_upload()`의 최근 41행 → `train_and_register.fine_tune(rows)` → `[INFO]` → `promoted`면 `[OK]`. 반환 `{"status": "ok" | "retrain_triggered", "promoted", "rmse"}`.
+  - `drift_detector.py`: `compute_rmse()` (**TODO 2**), `compute_bias()` (평균 오차 = 실제 − 예측), `assess(window)` → `{rmse, bias, anomalies, rmse_excl_anomalies, bias_excl_anomalies, drift}`. **두 층 판정**: 하루 오차 > `ANOMALY_THRESHOLD`(10,000)인 날은 이상치로 빼고, 나머지의 RMSE > `RMSE_THRESHOLD`(2,700) **그리고** |bias| > `BIAS_THRESHOLD`(2,000)일 때만 드리프트. `is_drift()`는 `assess()["drift"]`.
+  - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): `assess()` → 이상치 있으면 `[WARN] anomaly` → 드리프트 아니면 `ok` / `anomaly` / `high_error`(오차 크지만 치우침 없음, 재학습 안 함) 반환 → 드리프트면 `[WARN] drift` → 이전 Production 버전 기억 → `latest_upload()` 최근 41행 → `fine_tune()` → 승격 시 `reset_cache()` + `[OK]`. **롤백**: 직전 승격이 있고 다음 윈도우가 반대 부호 bias로 드리프트면 `[ROLLBACK]` — 새 버전 Archived, 이전 버전 Production, `reset_cache()`. 승격 기록은 프로세스 메모리(`_last_promotion`)에만 있다.
   - `scripts/simulate_drift.py` `send_batch()` (**TODO 5**): 랜덤워크 41일(정상 σ 1.2% / 드리프트 σ 3.6%)을 `/predict/batch-test`로 전송.
   - 로그: `aiops` 로거 → `logs/aiops.log` (`main.py`가 연결) → `GET /logs/aiops.log`로 대시보드가 읽는다.
-- **흐름**: 배치 전송 → `batch_test` → 예측 21건 → `is_drift` → (드리프트) `[WARN]` → `fine_tune` → 게이트 → 승격 `[OK]` / 유지.
+- **흐름**: 배치 전송 → `batch_test` → 예측 21건 → `assess` → 이상치 알림 / 치우침 없는 큰 오차 알림 / 드리프트 → (직전 승격과 반대 부호면 롤백) → `fine_tune` → 게이트 → 승격 `[OK]` / 유지.
 - **다른 영역과의 연결**
-  - A: `model_loader.get_model()`로 예측. 승격 후 A의 캐시 비우기 함수를 호출해야 새 모델이 서빙된다.
-  - C: `fine_tune(rows)`의 반환 형식에 의존. `latest_upload()`로 재학습 데이터를 얻는다.
-  - D2: 배치를 보내는 쪽. `BatchTestRequest`에 `departures`를 추가하면 D2 화면과 `docs/API_SPEC.md`도 바뀐다.
-- **설정**: `RMSE_THRESHOLD = 2700.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`, 시뮬레이션 σ 1.2% / 3.6%.
+  - A: `model_loader.get_model()`로 예측, 승격·롤백 뒤 `model_loader.reset_cache()` 호출.
+  - C: `fine_tune(rows)`의 반환 `{"promoted", "rmse", "version"}`에 의존. `latest_upload()`로 재학습 데이터를 얻는다. 롤백은 `MlflowClient.transition_model_version_stage`로 Registry 스테이지를 직접 바꾼다.
+  - D2: 배치를 보내는 쪽. `drift_check.status`가 `ok | anomaly | high_error | retrain_triggered | rolled_back` 다섯 가지로 늘었다.
+- **설정**: `RMSE_THRESHOLD = 2700.0`, `BIAS_THRESHOLD = 2000.0`, `ANOMALY_THRESHOLD = 10000.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`, 시뮬레이션 σ 1.2% / 3.6%.
 - **실행**: `python scripts/simulate_drift.py` (서버 기동 후) / 실데이터 배치: `data/jeju_drift_batch_41rows.csv`의 `arrivals` 41개를 `POST /predict/batch-test`
 
 ### 현재 상태
 
-- `compute_rmse()`, `batch_test()`, `send_batch()`: TODO 상태. `batch_test()`는 예측 없이 빈 `predictions`를 돌려준다.
-- `check_and_trigger()`: 드리프트 판정 시 `[WARN]` 로그까지만 남긴다. 재학습 호출 부분이 TODO다.
-- 판정 기준: 최근 21건의 예측·실제 쌍 RMSE > 2,700명.
-- 확정 전 이슈 (팀 결정 필요, 근거는 5번 사전 실험): 임계값 2,700명이 평상시 오차(2,275~2,570명)와 거의 같아 오탐이 잦다. 출발 여객 고정값이 250~950명의 오차를 더한다. 재학습 후 판정 윈도우에 이전 예측이 남아 다시 드리프트로 판정된다.
+- 이 브랜치(`exp/drift-anomaly`)에서 TODO 2~5 이식됨 (힌트 코드 그대로). `main`에는 아직 TODO 상태.
+- 판정: 두 층 (이상치 / 드리프트) + 롤백. 위 아키텍처 참고. 스켈레톤의 "RMSE > 2,700이면 재학습"에서 바뀐 것이라 **팀 결정 필요**.
+- 판정 기준값 세 개(2,700 / 2,000 / 10,000)는 PC 1대 1회 실험값으로 정했다. 평상시 |bias| 최대 1,886, 평상시 하루 최대 오차 −7,823, 드리프트 배치 bias −3,056, 결항일 오차 −10,940 ~ −29,616.
+- 남은 이슈: 출발 여객 고정값이 250~950명의 오차를 더한다 (`departures` 전달 여부 미결). 재학습 후 판정 윈도우 초기화 안 함. `_last_promotion`이 메모리에만 있어 서버 재시작 후 롤백 불가.
+- 폭설 배치를 넣으면 이상치 3일을 뺀 나머지도 드리프트(2025-01~02 수요 하락 실제)라 재학습이 돈다. 이때 재학습 데이터는 "최신 업로드의 마지막 41행"이라 배치와 무관한 기간일 수 있다 — 시연 순서에서 업로드 순서를 지켜야 한다.
 
 ### 측정값
 
-| 항목 | 값 | 조건 (PC, 명령) |
+브랜치 `exp/drift-anomaly`, PC 1대, 1회, in-process 실행 (서버 아님, 출발 여객 고정 37,000). bias = 실제 − 예측 평균.
+
+| 항목 | 값 | 조건 |
 |---|---|---|
-| 정상 배치 RMSE (`simulate_drift.py`) | 미측정 | |
-| 드리프트 배치 RMSE (`simulate_drift.py`) | 미측정 | |
-| 실데이터 폭설 배치 RMSE (`data/jeju_drift_batch_41rows.csv`) | 미측정 | |
-| 재학습 후 RMSE / 승격 버전 | 미측정 | |
-| `[WARN]` → `[INFO]` → `[OK]` 로그 | 미확인 | |
-| 재학습 소요 시간 (10 epoch) | 미측정 | |
+| v1 학습 (~2024-06-30, 547행) 게이트 RMSE | 2,353 (baseline 2,365~2,922, 실행마다 다름) | `train_baseline_v1.py`, `train_and_register.py` |
+| 정상 배치 2024-04-15~05-25 (v1) | RMSE 2,374 / bias +252 → `ok` | |
+| 드리프트 배치 2025-02-20~04-01 (v1) | RMSE 4,321 / bias −3,056 → 드리프트 → fine-tuning 게이트 2,491 → v2 승격 (14초) | 업로드 ~2025-04-01 |
+| 드리프트 배치 (v2) | RMSE 3,073 / bias −309 | 재학습이 치우침 제거 |
+| 다음 윈도우 2025-04-02~05-12 (v2) | RMSE 3,918 / bias +2,394 → 부호 반전 → **롤백 → v1** | v1로는 3,126 / −396 (`high_error`) |
+| 2025-05-13~06-22, 07-22~08-31 (v1) | 2,009 / −476, 2,383 / +715 → `ok` | |
+| 오탐 배치 2025-09-01~10-11 (v1) | 이상치 1일(10-11, −11,306) + 나머지 4,381 / +1,318 → `high_error` (재학습 안 함) | |
+| 폭설 배치 (v1) | 이상치 3일(02-04 −12,587, 02-05 −10,940, 02-07 −29,616) + 나머지 4,323 / −3,636 → 드리프트 → fine-tuning 게이트 실패 3,865 → v1 유지 | 재학습 데이터 = 최신 업로드(~05-12) 마지막 41행 |
+| 롤백 없이 v2에서 재재학습 | 게이트 실패 3,769 → v2에 갇힘 (v2는 이후 전 구간 bias +2,300~3,500) | |
+| 재학습 윈도우 41/62/90/120/180행 (v1에서) | after 배치 bias +2,394 / +3,432 / +4,633 / +4,506 / +2,365 — 길어도 과적응 | |
+| `simulate_drift.py` 랜덤워크 배치 | 미측정 | |
+| 서버(`/predict/batch-test`) 경유 재현 | 미측정 | |
 
 ### 트러블슈팅
 
-(아직 없음)
+- 2026-10-01 | 실험 | 드리프트 시연 정상 배치로 잡은 2024-05-21~06-30이 v1로 RMSE 2,820 → 임계값 초과 | 원인: `train_test_split`이 마지막 20%를 검증으로 떼어 이 구간이 학습에 안 들어감 + 06-29 하루 −7,598 | 해결: 학습 구간 안쪽 2024-04-15~05-25(2,374 / +252)로 교체 | 전후: 2,820 → 2,374
+- 2026-10-01 | 실험 | 재학습 후 다음 윈도우에서 v2가 v1보다 나쁨 (3,918 vs 3,126), v2에서 재재학습은 게이트 실패 | 원인: 41행 fine-tuning이 1분기 저점에 과적응, 2분기 수요 회복 | 해결: 반대 부호 bias 드리프트 시 이전 버전으로 롤백 | 전후: v2 갇힘 → v1 복귀, 이후 윈도우 `ok`
 
 ### 증빙
 
@@ -232,12 +243,14 @@
 
 ### 다른 영역에 요청
 
-- A: 승격 후 `_model_cache`를 비우는 함수.
-- C: `fine_tune()` 반환에 `version`이 들어 있는지 확인.
+- C: 승격 시 이전 Production을 Archived로 내리지 않아 여러 버전이 Production에 남는다. 롤백은 새 버전만 Archived로 내려서 동작하지만, `_register_if_gate_passed`에서 `archive_existing_versions=True`로 하면 깔끔하다.
+- D2: `drift_check.status` 다섯 가지를 카드에 색으로 구분 (`rolled_back`, `anomaly`, `high_error` 추가).
+- E: 상수 표에 `BIAS_THRESHOLD`, `ANOMALY_THRESHOLD` 추가, ③ 운영 설계 3번을 두 층 판정 + 롤백으로.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | TODO 상태 기록 | 해당 없음 | main
+- 2026-10-01 | 실험 | TODO 2~5 이식, 두 층 판정(이상치/드리프트, bias 조건), 롤백 추가 | 위 측정값 표 전체. 실행: 스크래치 worktree에서 in-process (`exp4*.py`, `scan_ft.py`) | exp/drift-anomaly
 
 ---
 
@@ -338,6 +351,8 @@
 | 배포 게이트 `RMSE_GATE` | 2,700명 | `serving_app/train_and_register.py`, `scripts/train_baseline_v1.py` |
 | 드리프트 임계값 `RMSE_THRESHOLD` | 2,700명 | `serving_app/monitoring/drift_detector.py` |
 | 판정 윈도우 `WINDOW_SIZE` | 21건 | `serving_app/monitoring/drift_detector.py` |
+| 드리프트 bias 기준 `BIAS_THRESHOLD` (브랜치) | 2,000명 | `serving_app/monitoring/drift_detector.py` — `exp/drift-anomaly`, 팀 결정 전 |
+| 이상치 기준 `ANOMALY_THRESHOLD` (브랜치) | 하루 오차 10,000명 | `serving_app/monitoring/drift_detector.py` — `exp/drift-anomaly`, 팀 결정 전 |
 | 입력 시퀀스 길이 `SEQ_LEN` | 20일 | `data/features.py` |
 | 시뮬레이션 고정 출발 여객 `SIMULATED_DEPARTURES` | 37,000명 | `serving_app/routers/predict.py` |
 | MLflow 모델 이름 | `Airport_Arrivals_Predictor` | `serving_app/model_loader.py`, `serving_app/train_and_register.py` |

@@ -89,6 +89,12 @@ def load_eager() -> LoadedModel:
     return model
 
 
+def reset_cache() -> None:
+    """재배포(승격·롤백) 뒤 호출. 다음 get_model()이 새 Production을 다시 불러온다."""
+    global _model_cache
+    _model_cache = None
+
+
 def get_model() -> LoadedModel:
     """Lazy Loading: 첫 요청이 들어올 때만 로드하고, 이후에는 캐시를 재사용한다."""
     global _model_cache

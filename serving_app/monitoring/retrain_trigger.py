@@ -14,16 +14,67 @@ latest_upload() - Day2 train_and_register()가 쓰는 것과 같은 소스).
 """
 import logging
 
-from serving_app.monitoring.drift_detector import WINDOW_SIZE, is_drift
+from serving_app.monitoring.drift_detector import RMSE_THRESHOLD, WINDOW_SIZE, assess
 
 logger = logging.getLogger("aiops")
 
+# 마지막 승격 기록: 재학습 직후 다음 윈도우에서 반대 방향 드리프트가 나오면(일시적 하락에 과적응) 이전 버전으로 되돌린다.
+# ponytail: 프로세스 메모리에만 저장. 서버 재시작 후에는 롤백 대상을 모른다. 필요하면 MLflow 태그로 옮긴다.
+_last_promotion: dict | None = None  # {"prev": 이전 Production 버전, "new": 승격 버전, "bias": 재학습을 부른 bias}
+
+
+def _production_version() -> str | None:
+    from mlflow import MlflowClient
+    from serving_app.train_and_register import MODEL_NAME
+
+    vs = MlflowClient().get_latest_versions(MODEL_NAME, stages=["Production"])
+    return vs[0].version if vs else None
+
+
+def _rollback(bias_now: float) -> dict:
+    global _last_promotion
+    from mlflow import MlflowClient
+    from serving_app import model_loader
+    from serving_app.train_and_register import MODEL_NAME
+
+    prev, new = _last_promotion["prev"], _last_promotion["new"]
+    c = MlflowClient()
+    c.transition_model_version_stage(MODEL_NAME, prev, "Production")
+    c.transition_model_version_stage(MODEL_NAME, new, "Archived")
+    model_loader.reset_cache()
+    logger.warning(
+        f"[ROLLBACK] drift flipped sign after retrain (trigger bias={_last_promotion['bias']:+.0f}, now {bias_now:+.0f}) "
+        f"- v{new} archived, v{prev} back to Production"
+    )
+    _last_promotion = None
+    return {"status": "rolled_back", "production_version": prev, "bias": bias_now}
+
 
 def check_and_trigger(recent_predictions: list[dict]) -> dict:
-    if not is_drift(recent_predictions):
-        return {"status": "ok"}
+    global _last_promotion
+    a = assess(recent_predictions)
+    if a["drift"] and _last_promotion and a["bias_excl_anomalies"] * _last_promotion["bias"] < 0:
+        return _rollback(a["bias_excl_anomalies"])
+    if a["anomalies"]:
+        # 하루 오차가 아주 큰 날(결항 등)은 재학습으로 배울 수 없다. 알림만 남기고 판정에서 뺀다.
+        worst = max(a["anomalies"], key=lambda p: abs(p["actual"] - p["predicted"]))
+        logger.warning(
+            f"[WARN] anomaly on {len(a['anomalies'])} day(s) - worst actual={worst['actual']:.0f} "
+            f"predicted={worst['predicted']:.0f} (excluded from drift check)"
+        )
+    if not a["drift"]:
+        if a["rmse_excl_anomalies"] > RMSE_THRESHOLD:
+            # 오차는 크지만 치우침이 없다 - 연휴·변동 큰 기간. 재학습으로 줄지 않으므로 알림만.
+            logger.warning(f"[WARN] high error without bias - rmse={a['rmse_excl_anomalies']:.0f} bias={a['bias_excl_anomalies']:+.0f} (no retrain)")
+            status = "high_error"
+        else:
+            status = "anomaly" if a["anomalies"] else "ok"
+        return {"status": status, "rmse": a["rmse"], "bias": a["bias"], "anomaly_days": len(a["anomalies"])}
 
-    logger.warning("[WARN] drift detected - triggering retrain")
+    logger.warning(
+        f"[WARN] drift detected - rmse={a['rmse_excl_anomalies']:.0f} bias={a['bias_excl_anomalies']:+.0f} "
+        f"(excluding {len(a['anomalies'])} anomaly day(s)) - triggering retrain"
+    )
 
     #   1) 최근 3주(21일) + 시퀀스 구성용 선행 SEQ_LEN(20)일을 업로드된 최신 CSV에서 조회한다.
     #   2) fine_tune(rows)로 Production 가중치에서 이어서 재학습한다 (처음부터 다시 학습하지 않음).
@@ -35,9 +86,14 @@ def check_and_trigger(recent_predictions: list[dict]) -> dict:
     from serving_app.train_and_register import fine_tune
 
     logger.info("[INFO] retrain triggered (window=last_21_days)")
+    prev = _production_version()
     rows = load_rows(latest_upload())[-(WINDOW_SIZE + SEQ_LEN):]
     result = fine_tune(rows)
     if result["promoted"]:
+        from serving_app import model_loader
+
+        model_loader.reset_cache()  # 다음 /predict부터 새 Production 사용
+        _last_promotion = {"prev": prev, "new": result["version"], "bias": a["bias_excl_anomalies"]}
         logger.info(f"[OK] new_rmse={result['rmse']:.0f} - production promoted: Airport_Arrivals_Predictor v{result['version']}")
-        return {"status": "retrain_triggered", "promoted": True, "rmse": result["rmse"]}
+        return {"status": "retrain_triggered", "promoted": True, "rmse": result["rmse"], "version": result["version"]}
     return {"status": "retrain_triggered", "promoted": False, "rmse": result["rmse"]}
