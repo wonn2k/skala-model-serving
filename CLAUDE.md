@@ -62,4 +62,6 @@ MODEL_SOURCE=mlflow uvicorn serving_app.main:app --port 8000
 - 수치(RMSE, 응답 시간, 버전 번호 등)와 과정(실행 명령, 오류 → 원인 → 해결)은 **실제로 실행해 얻은 그대로** 적는다.
   실행하지 않은 값은 추정해 채우지 않고 "미측정"으로 둔다.
 - 문서만 바꾸는 작업(`docs/`, `README.md`)은 갱신 대상이 아니다.
+- **코드 PR은 기획서 폴더 `docs/proposal/`을 건드리지 않는다.** 기획서 ①②③은 기획 담당이 별도 PR로 고치고,
+  ④⑤⑥은 **코드가 모두 완성된 뒤** 프롬프트로 `docs/code_current.md`에서 생성한다 (손으로 고치지 않음). 규칙: `docs/proposal/README.md`.
 - 이 파일을 기획서·보고서로 옮기는 프롬프트: 팀 노션 [기획서 작성 단계별 프롬프트](https://app.notion.com/p/3ebeb008246d81cc9398c8c664b31499).
