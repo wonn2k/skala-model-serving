@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from data.features import SEQ_LEN
 from serving_app import model_loader
 from serving_app.schemas import PredictRequest, PredictResponse, BatchTestRequest, BatchTestResponse
+from serving_app.monitoring.drift_detector import WINDOW_SIZE
 from serving_app.monitoring.retrain_trigger import check_and_trigger
 
 router = APIRouter()
@@ -38,28 +39,25 @@ def batch_test(req: BatchTestRequest):
     scripts/simulate_drift.py 가 정상/드리프트 배치(SEQ_LEN+N개의 연속 일별 도착 여객 수)를
     이 엔드포인트로 전송합니다.
 
-    TODO(Day3):
       1) req.arrivals 에서 길이 SEQ_LEN짜리 슬라이딩 윈도우를 만들어 각 윈도우 다음의
-         실제 도착 여객 수(actual)를 예측(predicted)과 함께 얻으세요.
-         (출발 여객 수는 SIMULATED_DEPARTURES 고정값을 사용하면 됩니다 - 실전 피처와 100% 동일하지
-          않아도 시뮬레이션 목적에는 충분합니다.)
-      2) 예측 결과를 {"predicted": ..., "actual": ...} 형태로 recent_predictions 에 누적하세요.
-      3) check_and_trigger(recent_predictions) 를 호출해 드리프트 여부를 확인하세요.
+         실제 도착 여객 수(actual)를 예측(predicted)과 함께 얻는다.
+         (출발 여객 수는 SIMULATED_DEPARTURES 고정값 - 실전 피처와 100% 동일하지
+          않아도 시뮬레이션 목적에는 충분하다.)
+      2) 예측 결과를 {"predicted": ..., "actual": ...} 형태로 recent_predictions 에 누적한다.
+      3) check_and_trigger(recent_predictions) 로 드리프트 여부를 확인한다.
     """
     model = model_loader.get_model()
     predictions: list[float] = []
 
-    # --- 여기부터 TODO ---
-    # arrivals = req.arrivals
-    # for i in range(len(arrivals) - SEQ_LEN):
-    #     window = arrivals[i : i + SEQ_LEN]
-    #     sequence = [{"arrivals": a, "departures": SIMULATED_DEPARTURES} for a in window]
-    #     pred = model.predict_one(sequence)
-    #     actual = arrivals[i + SEQ_LEN]
-    #     predictions.append(pred)
-    #     recent_predictions.append({"predicted": pred, "actual": actual})
-    # recent_predictions[:] = recent_predictions[-21:]  # WINDOW_SIZE 유지
-    # --- 여기까지 TODO ---
+    arrivals = req.arrivals
+    for i in range(len(arrivals) - SEQ_LEN):
+        window = arrivals[i : i + SEQ_LEN]
+        sequence = [{"arrivals": a, "departures": SIMULATED_DEPARTURES} for a in window]
+        pred = model.predict_one(sequence)
+        actual = arrivals[i + SEQ_LEN]
+        predictions.append(pred)
+        recent_predictions.append({"predicted": pred, "actual": actual})
+    recent_predictions[:] = recent_predictions[-WINDOW_SIZE:]  # WINDOW_SIZE 유지
 
     drift_check = check_and_trigger(recent_predictions)
     return BatchTestResponse(predictions=predictions, drift_check=drift_check)

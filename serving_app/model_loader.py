@@ -62,16 +62,14 @@ def _load_from_local() -> LoadedModel:
 
 def _load_from_mlflow() -> LoadedModel:
     """
-    TODO(Day2, 핵심 실습): mlflow.tensorflow.load_model(MLFLOW_MODEL_URI) 로
-    Production 모델을 로드하도록 완성하세요.
-    힌트: train_and_register.py 에서 이미 "Airport_Arrivals_Predictor" 이름으로 등록·승격까지 해두었습니다.
-
-    # import mlflow.tensorflow
-    # keras_model = mlflow.tensorflow.load_model(MLFLOW_MODEL_URI)
-    # scaler = AirportScaler.load(SCALER_PATH)  # 스케일러는 MLflow가 아니라 항상 로컬 파일에서
-    # return LoadedModel(keras_model=keras_model, scaler=scaler, version="production")
+    Day2: MLflow Model Registry의 Production 버전을 로드한다.
+    (train_and_register.py 에서 "Airport_Arrivals_Predictor" 이름으로 등록·승격한 모델)
     """
-    raise NotImplementedError("_load_from_mlflow를 구현하세요 (실습 2-1)")
+    import mlflow.tensorflow
+
+    keras_model = mlflow.tensorflow.load_model(MLFLOW_MODEL_URI)
+    scaler = AirportScaler.load(SCALER_PATH)  # 스케일러는 MLflow가 아니라 항상 로컬 파일에서
+    return LoadedModel(keras_model=keras_model, scaler=scaler, version="production")
 
 
 def _load_model() -> LoadedModel:

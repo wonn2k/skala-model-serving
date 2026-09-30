@@ -6,6 +6,8 @@ RMSE_THRESHOLD(2,700명)와 비교한다. 너무 짧은 윈도우는 노이즈�
 너무 긴 윈도우는 드리프트 반응이 느려진다 - 21은 "최근 3주(21일)" 기준으로 정한 절충점.
 (임계값은 배포 게이트 RMSE_GATE와 같은 값으로 두어, "게이트를 못 넘는 수준의 오차 = 드리프트"로 해석한다.)
 """
+import math
+
 RMSE_THRESHOLD = 2700.0  # 명 - serving_app/train_and_register.py의 RMSE_GATE와 동일
 WINDOW_SIZE = 21  # 최근 21건 기준
 
@@ -14,12 +16,14 @@ def compute_rmse(recent_predictions: list[dict]) -> float:
     """
     recent_predictions: [{"predicted": float, "actual": float}, ...]
 
-    TODO(Day3, 핵심 실습): 아래 수식대로 RMSE를 직접 구현하세요.
-        RMSE = sqrt( mean( (actual - predicted) ** 2 ) )
+    RMSE = sqrt( mean( (actual - predicted) ** 2 ) )
 
-    빈 리스트가 들어오면 드리프트가 없다고 간주할 수 있도록 0.0을 반환하세요.
+    빈 리스트가 들어오면 드리프트가 없다고 간주할 수 있도록 0.0을 반환한다.
     """
-    raise NotImplementedError("compute_rmse를 구현하세요 (실습 4-1)")
+    if not recent_predictions:
+        return 0.0
+    squared_errors = [(p["actual"] - p["predicted"]) ** 2 for p in recent_predictions]
+    return math.sqrt(sum(squared_errors) / len(squared_errors))
 
 
 def is_drift(recent_predictions: list[dict]) -> bool:

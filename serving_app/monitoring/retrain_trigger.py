@@ -14,7 +14,7 @@ latest_upload() - Day2 train_and_register()가 쓰는 것과 같은 소스).
 """
 import logging
 
-from serving_app.monitoring.drift_detector import is_drift
+from serving_app.monitoring.drift_detector import WINDOW_SIZE, is_drift
 
 logger = logging.getLogger("aiops")
 
@@ -25,24 +25,19 @@ def check_and_trigger(recent_predictions: list[dict]) -> dict:
 
     logger.warning("[WARN] drift detected - triggering retrain")
 
-    # TODO(Day3, 핵심 실습):
-    #   1) 최근 3주(21일) + 시퀀스 구성용 선행 SEQ_LEN(20)일을 조회하세요.
-    #      -> data/storage.py의 latest_upload()로 업로드된 최신 CSV 경로를 얻고,
-    #         data/features.py의 load_rows(경로)로 원본을 불러와 최근 (21+SEQ_LEN)행만
-    #         슬라이싱하세요.
-    #   2) Day2에서 작성한 serving_app.train_and_register.fine_tune(rows) 를 호출해
-    #      Production 가중치에서 이어서 재학습하세요 (처음부터 다시 학습하지 않습니다).
-    #   3) 반환된 결과(dict)의 "promoted" 값을 확인해 게이트 통과 여부를 판단하세요.
-    #
-    # from data.features import load_rows, SEQ_LEN
-    # from data.storage import latest_upload
-    # from serving_app.train_and_register import fine_tune
-    # logger.info("[INFO] retrain triggered (window=last_21_days)")
-    # rows = load_rows(latest_upload())[-(21 + SEQ_LEN):]
-    # result = fine_tune(rows)
-    # if result["promoted"]:
-    #     logger.info(f"[OK] new_rmse={result['rmse']:.0f} - production promoted: Airport_Arrivals_Predictor v{result['version']}")
-    #     return {"status": "retrain_triggered", "promoted": True, "rmse": result["rmse"]}
-    # return {"status": "retrain_triggered", "promoted": False, "rmse": result["rmse"]}
+    #   1) 최근 3주(21일) + 시퀀스 구성용 선행 SEQ_LEN(20)일을 업로드된 최신 CSV에서 조회한다.
+    #   2) fine_tune(rows)로 Production 가중치에서 이어서 재학습한다 (처음부터 다시 학습하지 않음).
+    #   3) 반환된 결과(dict)의 "promoted" 값으로 게이트 통과 여부를 판단한다.
+    # (train_and_register는 import 시점에 tensorflow/mlflow를 불러오므로, 서버 기동을 늦추지 않도록
+    #  드리프트가 감지된 시점에만 import한다.)
+    from data.features import load_rows, SEQ_LEN
+    from data.storage import latest_upload
+    from serving_app.train_and_register import fine_tune
 
-    return {"status": "retrain_triggered"}
+    logger.info("[INFO] retrain triggered (window=last_21_days)")
+    rows = load_rows(latest_upload())[-(WINDOW_SIZE + SEQ_LEN):]
+    result = fine_tune(rows)
+    if result["promoted"]:
+        logger.info(f"[OK] new_rmse={result['rmse']:.0f} - production promoted: Airport_Arrivals_Predictor v{result['version']}")
+        return {"status": "retrain_triggered", "promoted": True, "rmse": result["rmse"]}
+    return {"status": "retrain_triggered", "promoted": False, "rmse": result["rmse"]}
