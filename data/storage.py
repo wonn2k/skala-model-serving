@@ -19,6 +19,6 @@ def latest_upload(upload_dir: str = UPLOAD_DIR) -> str:
     if not files:
         raise FileNotFoundError(
             "업로드된 공항 도착 여객 데이터가 없습니다. 대시보드에서 CSV 파일을 먼저 업로드하세요 "
-            f"(data/sample_airport_arrivals.csv를 예시로 업로드해볼 수 있습니다 -> {upload_dir}/)."
+            f"(data/jeju_airport_arrivals.csv를 예시로 업로드해볼 수 있습니다 -> {upload_dir}/)."
         )
     return files[-1]
