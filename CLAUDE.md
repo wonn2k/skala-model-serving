@@ -31,6 +31,8 @@
 ## 데이터
 - 학습: `data/jeju_airport_arrivals.csv` (Date,Arrivals,Departures · 2023-01-01~2025-10-31 · 1,035일) → 대시보드에서 업로드.
 - 드리프트 시연: `data/jeju_drift_batch_41rows.csv` (폭설 결항일 6,088명 포함) → `/predict/batch-test`에 `arrivals` 41개.
+- 시연 순서용 컷: `data/jeju_demo_train_until_20250831.csv`(1단계 업로드), `jeju_demo_batch_normal_41rows.csv`(정상),
+  `jeju_demo_batch_falsealarm_41rows.csv`(오탐 사례). 순서와 확인값: `data/README.md` "시연 순서".
 - 원자료 `data/raw/`는 출처 보관용. 재생성: `python scripts/prepare_jeju_data.py`.
 
 ## 로컬 실행 (venv)

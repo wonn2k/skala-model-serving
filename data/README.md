@@ -7,9 +7,25 @@
 | `raw/kac_jeju_daily_passengers_20230101_20251031.csv` | 한국공항공사 **제주공항 일별 여객** 원자료 (UTF-8 재인코딩). 컬럼: `운항일자, 도착여객(명), 출발여객(명), 전체여객(명)`, 2023-01-01 ~ 2025-10-31, 1,035행 | 출처 보관·재현 |
 | `jeju_airport_arrivals.csv` | 원자료를 업로드 형식으로 변환한 **학습용 데이터**. 컬럼: `Date, Arrivals, Departures` | 대시보드에 업로드 → Day1 baseline / Day2 MLflow 학습 |
 | `jeju_drift_batch_41rows.csv` | 2025-01-09 ~ 2025-02-18 **41일 실데이터 슬라이스**. 폭설 결항일(2025-01-09 17,093명 · 2025-02-07 **6,088명**) 포함 | Day3 드리프트 주입용 실데이터 배치 (`/predict/batch-test`에 `arrivals` 41개로 전송) |
+| `jeju_demo_train_until_20250831.csv` | 학습용 데이터의 2023-01-01 ~ 2025-08-31 **974행** | 시연 1단계 업로드. 이후 구간(9~10월)을 "아직 안 본 미래"로 남긴다 |
+| `jeju_demo_batch_normal_41rows.csv` | 2025-07-22 ~ 2025-08-31 41일 (학습 구간 안) | 시연 정상 배치 → `ok` 확인 |
+| `jeju_demo_batch_falsealarm_41rows.csv` | 2025-09-01 ~ 2025-10-11 41일 (학습 구간 밖, 결항 없음) | **오탐 사례**. 출발 여객 고정값 때문에 임계값을 넘는다 |
 | `uploads/` | 대시보드에서 업로드한 CSV가 쌓이는 곳 (git 제외) | 학습·시뮬레이션은 항상 최신 파일 사용 |
 
 데이터 선정 배경·상세는 팀 노션 [데이터 페이지](https://app.notion.com/p/3eb56fb7f28f80cf9758c1c949158d99) 참고.
+
+## 시연 순서 (사전 확인: 임시 복사본, PC 1대, 1회)
+
+| 순서 | 파일 | 하는 일 | 확인된 결과 |
+|---|---|---|---|
+| 1 | `jeju_demo_train_until_20250831.csv` | 업로드 → baseline → MLflow 학습 | 학습 RMSE 2,241명, 게이트 통과 |
+| 2 | (최근 20일 = 08-12 ~ 08-31) | `/predict` | 09-01 예측 35,715명 (실제 33,819명) |
+| 3 | `jeju_demo_batch_normal_41rows.csv` | `/predict/batch-test` | RMSE 2,226명 → `ok` |
+| 4 | `jeju_airport_arrivals.csv` (전체) | 업로드 | 재학습 데이터가 전체 파일로 바뀜 |
+| 5 | `jeju_drift_batch_41rows.csv` (폭설) | `/predict/batch-test` | RMSE 6,224명 → 드리프트 → 재학습 → 게이트 통과 시 승격 |
+| (설명용) | `jeju_demo_batch_falsealarm_41rows.csv` | `/predict/batch-test` | RMSE 3,715명 (출발 고정) / 2,754명 (실제 출발). 결항 없는 평상시인데 임계값 초과 → 오탐 |
+
+팀 PC에서 이식된 코드로 같은 값이 나오는지 재확인한다 (`docs/code_current.md` 3번·5번에 기록).
 
 ## 컬럼 매핑
 
