@@ -35,7 +35,8 @@
 
 ## 로컬 실행 (venv)
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+python3.12 -m venv .venv && source .venv/bin/activate   # Windows: py -3.12 -m venv .venv ; .\.venv\Scripts\Activate.ps1
+# Python 3.11 또는 3.12 (3.13은 tensorflow 휠 호환 불안, 3.10은 numpy 2.4 미지원)
 pip install -r requirements.txt
 uvicorn serving_app.main:app --host 0.0.0.0 --port 8000
 # 대시보드에서 data/jeju_airport_arrivals.csv 업로드 후 별도 터미널에서
