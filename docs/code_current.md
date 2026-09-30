@@ -5,107 +5,363 @@
 
 ## 작성 규칙
 
-- **자기 영역 섹션만 고친다.** 영역은 아래 1~5번이다. 여러 명이 동시에 고치므로 남의 섹션을 건드리면 병합 충돌이 난다.
-- 영역 섹션은 두 부분이다.
-  - **현재 상태**: 지금 코드 기준으로 덮어쓴다. 더 이상 사실이 아닌 문장은 지운다.
-  - **변경 기록**: 맨 아래에 한 줄을 추가한다. 기존 줄은 지우거나 고치지 않는다.
-- 변경 기록 형식: `- YYYY-MM-DD HH:MM | 작성자 | 무엇을 바꿨나 | 확인한 수치·결과와 실행 명령 | 브랜치 또는 PR`
-- 수치(RMSE, 응답 시간, 버전 번호, 예측 개수 등)와 과정은 **실제로 실행해 얻은 그대로** 적는다. 반올림하거나 요약하지 않는다. 실행하지 않은 값은 추정해 채우지 않고 `미측정`으로 둔다.
-- 오류를 만나면 6번에 `증상 → 원인 → 해결 명령 → 전후 결과`로 남긴다.
-- 캡처를 찍으면 7번 표의 해당 행을 채운다.
-- 상태가 달라진 단계는 0번 표도 고친다 (0번 표는 누구나 자기 행만 고친다).
+- **섹션 하나에 주인 한 명.** 자기 섹션(1~6번 중 하나)만 고친다. 남의 섹션은 한 글자도 건드리지 않는다. 0번 표는 E만 고친다.
+  같은 파일이라도 섹션 사이가 멀리 떨어져 있어 서로 다른 섹션만 고치면 병합 충돌이 나지 않는다.
+- 남의 영역에 할 말이 있으면 (예: "A가 캐시를 비워야 내 재배포가 보인다") 자기 섹션 "다른 영역에 요청"에 적고 PR 리뷰에서 말한다. 남의 섹션에 대신 적지 않는다.
+- 섹션 구성은 모두 같다. 소제목을 지우거나 순서를 바꾸지 않는다 (프롬프트가 소제목 이름으로 찾는다).
 
-## 0. 한눈에 보기
-
-| 파이프라인 단계 | 상태 | 근거 |
+| 소제목 | 어떻게 쓰나 | 어디에 쓰이나 |
 |---|---|---|
-| CSV 업로드 (`POST /data/upload`, `GET /data/status`) | 동작 | 스켈레톤 제공. `data/jeju_airport_arrivals.csv` 1,035행 업로드 (PC 1대) |
-| Day1 baseline 학습 (`scripts/train_baseline_v1.py`) | 동작 | RMSE 2,571명, 게이트 2,700명 통과 (PC 1대) |
-| Day2 MLflow 학습·게이트·Production 승격 (`serving_app/train_and_register.py`) | 동작 | RMSE 2,267명, 게이트 통과 후 Production 승격 (PC 1대) |
-| 예측 서빙 `POST /predict` (로컬 모델) | 코드 완성 | 응답 확인 기록 없음 (미측정) |
-| MLflow Production 모델 서빙 (`MODEL_SOURCE=mlflow`) | 미구현 | TODO 1 `_load_from_mlflow` |
-| 드리프트 판정 (`POST /predict/batch-test`) | 미구현 | TODO 2 `compute_rmse`, TODO 3 `batch_test` |
-| 드리프트 감지 시 자동 재학습 | 미구현 | TODO 4 `check_and_trigger` |
-| 드리프트 시뮬레이션 스크립트 | 미구현 | TODO 5 `send_batch` |
-| Production 버전 조회 `GET /monitor/versions` | 미구현 | 설계안만 있음 (`docs/API_SPEC.md`) |
-| 대시보드 예측값·혼잡 등급 카드, Production 버전 표기 | 미구현 | 업로드·드리프트 시뮬레이션·재학습 로그 카드는 스켈레톤에 있음 |
-| Docker 컨테이너 재현 | 미확인 | TODO 1 구현 전에는 기동 실패 예상 (2번 참고) |
+| 담당 / 대상 파일 | 바뀌면 고친다 | 협업 계획 |
+| 아키텍처 | 코드 기준으로 **덮어쓴다.** 항목 이름(역할·구성 요소·흐름·연결·설정·실행)은 고정 | ④ 아키텍처 구성도 (프롬프트 4가 6개 섹션의 "아키텍처"를 합쳐 전체 구성도를 만든다) |
+| 현재 상태 | 지금 코드 기준으로 **덮어쓴다.** 사실이 아닌 문장은 지운다 | ③ 운영 설계, ⑤ API 명세 |
+| 측정값 | 실행해서 얻은 값만. 반올림·요약 금지. 안 했으면 `미측정` | ② 운영 목표, ③ 운영 설계 |
+| 트러블슈팅 | `증상 → 원인 → 해결 명령 → 전후 결과`. 맨 아래에 추가 | 구현 보고서 |
+| 증빙 | 찍은 캡처를 `docs/snapshots/`에 두고 표를 채운다 | ⑥ 동작 화면 스냅샷 |
+| 다른 영역에 요청 | 남의 코드가 바뀌어야 내 것이 되는 일 | 체크포인트 |
+| 변경 기록 | 맨 아래에 한 줄 **추가**. 기존 줄은 안 고친다. `- YYYY-MM-DD HH:MM \| 작성자 \| 무엇을 바꿨나 \| 확인한 수치·결과와 실행 명령 \| 브랜치 또는 PR` | 구현 보고서 |
 
-## 1. 서빙 API
+## 0. 한눈에 보기 (E만 고친다)
 
-대상: `serving_app/main.py`, `serving_app/model_loader.py`, `serving_app/routers/predict.py`, `serving_app/routers/health.py`, `serving_app/schemas.py`
+체크포인트마다 E가 각 섹션 "현재 상태"를 보고 이 표를 갱신한다. 다른 사람은 자기 섹션만 고친다.
+
+| 파이프라인 단계 | 담당 | 상태 | 근거 |
+|---|---|---|---|
+| CSV 업로드 (`POST /data/upload`, `GET /data/status`) | C | 동작 | 스켈레톤 제공. `data/jeju_airport_arrivals.csv` 1,035행 업로드 (PC 1대) |
+| Day1 baseline 학습 (`scripts/train_baseline_v1.py`) | C | 동작 | RMSE 2,571명, 게이트 2,700명 통과 (PC 1대) |
+| Day2 MLflow 학습·게이트·Production 승격 (`serving_app/train_and_register.py`) | C | 동작 | RMSE 2,267명, 게이트 통과 후 Production 승격 (PC 1대) |
+| 예측 서빙 `POST /predict` (로컬 모델) | A | 코드 완성 | 응답 확인 기록 없음 (미측정) |
+| MLflow Production 모델 서빙 (`MODEL_SOURCE=mlflow`) | A | 미구현 | TODO 1 `_load_from_mlflow` |
+| 드리프트 판정 (`POST /predict/batch-test`) | B | 미구현 | TODO 2 `compute_rmse`, TODO 3 `batch_test` |
+| 드리프트 감지 시 자동 재학습 | B | 미구현 | TODO 4 `check_and_trigger` |
+| 드리프트 시뮬레이션 스크립트 | B | 미구현 | TODO 5 `send_batch` |
+| `GET /data/status`의 `recent` (최근 20일) | C | 미구현 | 설계만 있음 (4번 참고) |
+| Production 버전 조회 `GET /monitor/versions` | C | 미구현 | 설계안만 있음 (`docs/API_SPEC.md`) |
+| 대시보드 예측값·혼잡 등급 카드 | D1 | 미구현 | |
+| 대시보드 CSV 배치 전송, Production 버전 표기 | D2 | 미구현 | 업로드·드리프트 시뮬레이션·재학습 로그 카드는 스켈레톤에 있음 |
+| Docker 컨테이너 재현 | C | 미확인 | TODO 1 구현 전에는 기동 실패 예상 (2번 참고) |
+| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 미실행 | 본 레포 코드로는 미실행. 사전 실험은 6번 참고 |
+
+---
+
+## 1. 서빙 API — 담당 A
+
+### 대상 파일
+
+`serving_app/main.py`, `serving_app/model_loader.py`, `serving_app/routers/predict.py`의 `predict()`, `serving_app/routers/health.py`, `serving_app/schemas.py`
+(`predict.py`의 `batch_test()`와 `schemas.py`의 `BatchTest*`는 B 영역. 같은 파일이므로 PR을 작게 나누고 먼저 머지된 쪽에 rebase한다.)
+
+### 아키텍처
+
+- **역할**: 최근 20일 시퀀스를 받아 다음 날 도착 여객 수 하나를 돌려주는 HTTP 서버. 모델을 어디서(로컬 파일 / MLflow Production) 언제(기동 시 / 첫 요청 시) 불러올지 정한다.
+- **구성 요소**
+  - `main.py`: `FastAPI` 앱 생성, 라우터 4개 등록(`predict`, `health`, `data`, `logs`), `aiops` 로거를 `logs/aiops.log`에 연결, `static/`을 `/`에 마운트, `startup`에서 `LOADING_MODE=eager`면 `model_loader.load_eager()`.
+  - `model_loader.py`: `get_model()` → `_model_cache`가 비어 있으면 `_load_model()` → `MODEL_SOURCE`에 따라 `_load_from_local()`(`serving_app/models/airport_v1.keras` + `scaler.pkl`, 버전 `v1-local`) 또는 `_load_from_mlflow()`(`models:/Airport_Arrivals_Predictor/Production`, **TODO 1**). 반환은 `LoadedModel(predict_one, version)`.
+  - `routers/predict.py` `predict()`: `PredictRequest.sequence` 20개 → `model.predict_one()` → `PredictResponse(predicted_arrivals, model_version)`.
+  - `routers/health.py`: `GET /health` → 상태, 로딩 모드, 모델 로드 여부.
+  - `schemas.py`: `PredictRequest`(길이 20, `arrivals`·`departures` 0 이상 정수), 위반 시 422.
+- **흐름**: 대시보드 또는 클라이언트 → `POST /predict` → Pydantic 검증 → `get_model()`(캐시) → 스케일 → LSTM → 역스케일 → JSON 응답.
+- **다른 영역과의 연결**
+  - C가 만드는 `GET /data/status`의 `recent`가 이 API의 입력이 된다 (D1이 호출).
+  - B의 재학습이 새 Production을 승격해도 `_model_cache`는 그대로다. 승격 시 캐시를 비우는 함수(예: `model_loader.reset_cache()`)를 A가 제공하고 B가 호출한다.
+  - `model_version` 값은 D2가 대시보드에 표시한다.
+- **설정**: `LOADING_MODE=lazy|eager`(기본 lazy), `MODEL_SOURCE=local|mlflow`(기본 local), `MLFLOW_MODEL_URI`.
+- **실행**: `uvicorn serving_app.main:app --host 0.0.0.0 --port 8000` / MLflow 모델: `MODEL_SOURCE=mlflow uvicorn ...`
 
 ### 현재 상태
 
 - `GET /health`, `POST /predict`는 스켈레톤 그대로 완성되어 있다.
-- `/predict` 입력은 최근 20일 시퀀스(`arrivals`, `departures`)이며 길이가 20이 아니거나 값이 음수이면 422로 거부한다 (`schemas.py`).
-- 모델 로딩은 환경변수로 바꾼다: `LOADING_MODE=lazy`(기본) 또는 `eager`, `MODEL_SOURCE=local`(기본) 또는 `mlflow`.
-- `model_loader._load_from_mlflow()`는 TODO 상태다. `MODEL_SOURCE=mlflow`로 모델을 불러오면 `NotImplementedError`가 난다.
-- `routers/predict.batch_test()`는 TODO 상태다. 예측 없이 빈 `predictions`를 돌려준다.
+- `/predict` 입력은 최근 20일 시퀀스(`arrivals`, `departures`)이며 길이가 20이 아니거나 값이 음수이면 422로 거부한다.
+- `model_loader._load_from_mlflow()`는 TODO 1 상태다. `MODEL_SOURCE=mlflow`로 모델을 불러오면 `NotImplementedError`가 난다.
 - 재배포 후 서빙 모델 반영: `_model_cache`가 자동으로 갱신되지 않는다 (미해결, 수업 가이드 부록 1의 6번).
-- Lazy / Eager 서버 시작 시간, 첫 요청 응답 시간: 미측정.
-- `/predict` 응답 시간: 미측정.
+
+### 측정값
+
+| 항목 | 값 | 조건 (PC, 명령) |
+|---|---|---|
+| `/predict` 첫 요청 응답 시간 (lazy) | 미측정 | |
+| `/predict` 두 번째 요청 응답 시간 | 미측정 | |
+| 서버 시작 시간 lazy / eager | 미측정 | |
+| `/predict` 응답 예시 (로컬 모델) | 미측정 | |
+| `/predict` 응답 예시 (MLflow 모델, `model_version`) | 미측정 | |
+
+### 트러블슈팅
+
+(아직 없음)
+
+### 증빙
+
+| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
+|---|---|---|---|---|
+| `/predict` 응답 (로컬 모델) | `model_version`이 `v1-local` | 미촬영 | | |
+| `/predict` 응답 (MLflow 모델) | `model_version`이 `production`으로 전환 | 미촬영 | | |
+| `/predict` 422 응답 | 시퀀스 19개, 음수 값 입력이 거부됨 | 미촬영 | | |
+| `/health` 응답 | 로딩 모드와 모델 로드 여부 | 미촬영 | | |
+
+### 다른 영역에 요청
+
+- C: `GET /data/status`에 `recent`(최근 20일, 오래된 순, `{date, arrivals, departures}`)를 넣어 주면 `/predict` 입력을 그대로 만들 수 있다.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | 스켈레톤을 공항 도메인으로 치환한 상태를 기록 | 해당 없음 | main
 
-## 2. 학습·배포
+---
 
-대상: `scripts/train_baseline_v1.py`, `serving_app/train_and_register.py`, `serving_app/Dockerfile`, `serving_app/docker-compose.yml`, `serving_app/routers/monitor.py`(신설 예정)
+## 2. 학습·배포·버전 조회 — 담당 C
+
+### 대상 파일
+
+`scripts/train_baseline_v1.py`, `serving_app/train_and_register.py`(`fine_tune()` 호출은 B), `serving_app/routers/data.py`, `serving_app/routers/monitor.py`(신설), `serving_app/Dockerfile`, `serving_app/docker-compose.yml`, `requirements.txt`, `data/storage.py`
+
+### 아키텍처
+
+- **역할**: 업로드된 CSV로 모델을 학습하고, 게이트(RMSE ≤ 2,700명)를 통과한 버전만 MLflow Production에 올린다. 어느 PC에서나 같은 절차로 재현되게 컨테이너로 묶는다.
+- **구성 요소**
+  - `routers/data.py`: `POST /data/upload`(컬럼 `Date,Arrivals,Departures` 검사, 최소 행 수 `SEQ_LEN + WINDOW_SIZE` = 41, `data/uploads/`에 저장) / `GET /data/status`(행 수, 기간, 최소·최대). `data/storage.py`의 `latest_upload()`가 최신 파일 경로를 준다.
+  - `scripts/train_baseline_v1.py`: Day1. 최신 업로드로 학습 → 마지막 20% 검증 RMSE → 게이트 → `serving_app/models/airport_v1.keras`, `scaler.pkl` 저장.
+  - `train_and_register.py`: `train_and_register()` — seed 42, 100 epoch → `rmse()` → MLflow run 기록 → `_register_if_gate_passed()`가 통과 시 `Airport_Arrivals_Predictor` 등록 + Production 승격. `fine_tune(rows)` — Production 가중치에서 10 epoch, LR 1e-4, 같은 게이트 (호출은 B의 TODO 4).
+  - `routers/monitor.py` (신설 예정): `GET /monitor/versions` → MLflow Registry에서 Production 버전·run_id·RMSE·생성 시각 (`docs/API_SPEC.md`).
+  - `Dockerfile`: 이미지 빌드 중 baseline + MLflow 학습 실행, `MODEL_SOURCE=mlflow`, `LOADING_MODE=eager`로 기동.
+- **흐름**: 대시보드 CSV 업로드 → `data/uploads/` → `train_baseline_v1.py`(로컬 모델) → `train_and_register.py`(MLflow run → 게이트 → Registry → Production) → A의 `_load_from_mlflow()`가 읽는다.
+- **다른 영역과의 연결**
+  - A: `MLFLOW_MODEL_URI = models:/Airport_Arrivals_Predictor/Production`을 읽는다. Registry 이름·스테이지를 바꾸면 A도 바뀐다.
+  - B: `fine_tune(rows)`를 호출하고 반환 `{"promoted", "rmse", "version"}`을 쓴다. 반환 형식을 바꾸면 B도 바뀐다.
+  - D1: `GET /data/status`의 `recent`를 읽는다. D2: `GET /monitor/versions`를 읽는다.
+- **설정**: `RMSE_GATE = 2700.0`, `SEED = 42`, `BASE_EPOCHS = 100`, `FINE_TUNE_EPOCHS = 10`, `FINE_TUNE_LR = 1e-4`, `MODEL_NAME`. MLflow 저장소는 cwd의 `mlflow.db`, `mlruns/`.
+- **실행**: `python scripts/train_baseline_v1.py` → `python serving_app/train_and_register.py` / `docker compose -f serving_app/docker-compose.yml up --build`
 
 ### 현재 상태
 
 - Day1 baseline: RMSE 2,571명으로 게이트 2,700명 통과. 전일값 복사 기준선 3,600명 대비 -29%. PC 1대에서 실행한 결과다.
 - Day2 base 학습(100 epoch, seed 42): RMSE 2,267명(2266.94)으로 게이트 통과, `Airport_Arrivals_Predictor`가 Production으로 승격됐다. PC 1대에서 실행한 결과다.
 - 모델 파일(`*.keras`, `scaler.pkl`)과 MLflow 기록(`mlflow.db`, `mlruns/`)은 커밋하지 않는다. 각자 PC에서 업로드 → baseline → MLflow 학습을 직접 실행해야 한다.
-- fine-tuning(`fine_tune`)은 스켈레톤에 구현되어 있다: Production 가중치에서 이어서 10 epoch, 학습률 1e-4. 호출하는 쪽(TODO 4)이 미구현이라 실행 기록은 없다.
-- `GET /monitor/versions`: 미구현.
-- Docker: 미확인. Dockerfile은 이미지 빌드 중에 baseline과 MLflow 학습을 실행하고 `MODEL_SOURCE=mlflow`, `LOADING_MODE=eager`로 시작하므로, TODO 1이 구현되기 전에는 컨테이너 기동이 실패할 것으로 예상된다.
-- 다른 PC에서의 게이트 통과 여부: 미측정.
+- `fine_tune()`은 스켈레톤에 구현되어 있다. 호출하는 쪽(B의 TODO 4)이 미구현이라 실행 기록은 없다.
+- 승격 시 기존 Production 버전을 Archived로 내리지 않는다. Production에 여러 버전이 남을 수 있다 (사전 실험에서 확인, 6번).
+- `GET /data/status`의 `recent`: 미구현. 설계: 최신 업로드의 마지막 `SEQ_LEN`(20)행, 오래된 순, `[{date, arrivals, departures}]` 정수.
+- `GET /monitor/versions`: 미구현. 설계: `docs/API_SPEC.md`.
+- Docker: 미확인. TODO 1이 구현되기 전에는 컨테이너 기동이 실패할 것으로 예상된다.
+
+### 측정값
+
+| 항목 | 값 | 조건 (PC, 명령) |
+|---|---|---|
+| Day1 baseline RMSE | 2,571명 | PC 1대, `python scripts/train_baseline_v1.py` |
+| Day2 MLflow 학습 RMSE | 2,267명 (2266.94) | PC 1대, `python serving_app/train_and_register.py` |
+| 다른 PC에서의 게이트 통과 여부 | 미측정 | |
+| 학습 소요 시간 (100 epoch) | 미측정 | |
+| 컨테이너 빌드 시간 / 기동 성공 여부 | 미측정 | |
+| `GET /monitor/versions` 응답 예시 | 미측정 | |
+
+### 트러블슈팅
+
+(아직 없음)
+
+### 증빙
+
+| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
+|---|---|---|---|---|
+| `train_and_register.py` 실행 로그 | `[GATE PASSED]`와 RMSE | 미촬영 | | |
+| MLflow UI Registry 화면 | Production 버전 | 미촬영 | | |
+| 컨테이너 빌드·실행 로그 | Docker로 재현됨 | 미촬영 | | |
+| 컨테이너의 Swagger 화면 | 컨테이너에서도 같은 API가 동작 | 미촬영 | | |
+| `GET /monitor/versions` 응답 | Production 버전·RMSE | 미촬영 | | |
+
+### 다른 영역에 요청
+
+(아직 없음)
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | Day1·Day2 실행 결과 기록 | Day1 RMSE 2,571명 (`python scripts/train_baseline_v1.py`), Day2 RMSE 2,267명 (`python serving_app/train_and_register.py`) | main
 
-## 3. 모니터링·AIOps
+---
 
-대상: `serving_app/monitoring/drift_detector.py`, `serving_app/monitoring/retrain_trigger.py`, `scripts/simulate_drift.py`
+## 3. 모니터링·AIOps — 담당 B
+
+### 대상 파일
+
+`serving_app/monitoring/drift_detector.py`, `serving_app/monitoring/retrain_trigger.py`, `scripts/simulate_drift.py`, `serving_app/routers/predict.py`의 `batch_test()`, `serving_app/schemas.py`의 `BatchTestRequest`·`BatchTestResponse`
+
+### 아키텍처
+
+- **역할**: 예측·실제 쌍을 쌓아 오차를 감시하고, 임계값을 넘으면 알림 → 최근 데이터로 fine-tuning → 게이트 재검증 → 재배포까지 사람 없이 잇는다.
+- **구성 요소**
+  - `routers/predict.py` `batch_test()` (**TODO 3**): `BatchTestRequest.arrivals` 41개 → 길이 20 슬라이딩 윈도우 21개 → 각 윈도우로 예측(출발 여객은 `SIMULATED_DEPARTURES` 고정) → `recent_predictions`에 `{"predicted", "actual"}` 누적(최근 21건 유지) → `check_and_trigger()` → `BatchTestResponse(predictions, drift_check)`.
+  - `drift_detector.py`: `compute_rmse(recent_predictions)` (**TODO 2**), `is_drift()` = RMSE > `RMSE_THRESHOLD`(2,700명), `WINDOW_SIZE = 21`.
+  - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): 드리프트면 `[WARN]` → `latest_upload()`의 최근 41행 → `train_and_register.fine_tune(rows)` → `[INFO]` → `promoted`면 `[OK]`. 반환 `{"status": "ok" | "retrain_triggered", "promoted", "rmse"}`.
+  - `scripts/simulate_drift.py` `send_batch()` (**TODO 5**): 랜덤워크 41일(정상 σ 1.2% / 드리프트 σ 3.6%)을 `/predict/batch-test`로 전송.
+  - 로그: `aiops` 로거 → `logs/aiops.log` (`main.py`가 연결) → `GET /logs/aiops.log`로 대시보드가 읽는다.
+- **흐름**: 배치 전송 → `batch_test` → 예측 21건 → `is_drift` → (드리프트) `[WARN]` → `fine_tune` → 게이트 → 승격 `[OK]` / 유지.
+- **다른 영역과의 연결**
+  - A: `model_loader.get_model()`로 예측. 승격 후 A의 캐시 비우기 함수를 호출해야 새 모델이 서빙된다.
+  - C: `fine_tune(rows)`의 반환 형식에 의존. `latest_upload()`로 재학습 데이터를 얻는다.
+  - D2: 배치를 보내는 쪽. `BatchTestRequest`에 `departures`를 추가하면 D2 화면과 `docs/API_SPEC.md`도 바뀐다.
+- **설정**: `RMSE_THRESHOLD = 2700.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`, 시뮬레이션 σ 1.2% / 3.6%.
+- **실행**: `python scripts/simulate_drift.py` (서버 기동 후) / 실데이터 배치: `data/jeju_drift_batch_41rows.csv`의 `arrivals` 41개를 `POST /predict/batch-test`
 
 ### 현재 상태
 
-- `drift_detector.compute_rmse()`: TODO 상태.
-- `retrain_trigger.check_and_trigger()`: 드리프트 판정 시 `[WARN]` 로그까지만 남긴다. 재학습 호출 부분이 TODO 상태다.
-- `simulate_drift.send_batch()`: TODO 상태.
-- 판정 기준: 최근 21건(`WINDOW_SIZE`)의 예측·실제 쌍으로 RMSE를 구해 2,700명(`RMSE_THRESHOLD`)과 비교한다.
-- 시뮬레이션 배치: 41개(시퀀스 20 + 윈도우 21) 랜덤워크, 일별 변동성 정상 1.2% / 드리프트 3.6%.
-- 정상 배치 RMSE, 드리프트 배치 RMSE, 실데이터 드리프트 배치(`data/jeju_drift_batch_41rows.csv`) RMSE: 미측정.
-- `logs/aiops.log`의 `[WARN]` → `[INFO]` → `[OK]` 기록: 미확인.
-- 재학습 후 RMSE와 승격 버전: 미측정.
+- `compute_rmse()`, `batch_test()`, `send_batch()`: TODO 상태. `batch_test()`는 예측 없이 빈 `predictions`를 돌려준다.
+- `check_and_trigger()`: 드리프트 판정 시 `[WARN]` 로그까지만 남긴다. 재학습 호출 부분이 TODO다.
+- 판정 기준: 최근 21건의 예측·실제 쌍 RMSE > 2,700명.
+- 확정 전 이슈 (팀 결정 필요, 근거는 6번 사전 실험): 임계값 2,700명이 평상시 오차(2,275~2,570명)와 거의 같아 오탐이 잦다. 출발 여객 고정값이 250~950명의 오차를 더한다. 재학습 후 판정 윈도우에 이전 예측이 남아 다시 드리프트로 판정된다.
+
+### 측정값
+
+| 항목 | 값 | 조건 (PC, 명령) |
+|---|---|---|
+| 정상 배치 RMSE (`simulate_drift.py`) | 미측정 | |
+| 드리프트 배치 RMSE (`simulate_drift.py`) | 미측정 | |
+| 실데이터 폭설 배치 RMSE (`data/jeju_drift_batch_41rows.csv`) | 미측정 | |
+| 재학습 후 RMSE / 승격 버전 | 미측정 | |
+| `[WARN]` → `[INFO]` → `[OK]` 로그 | 미확인 | |
+| 재학습 소요 시간 (10 epoch) | 미측정 | |
+
+### 트러블슈팅
+
+(아직 없음)
+
+### 증빙
+
+| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
+|---|---|---|---|---|
+| `simulate_drift.py` 실행 결과 | 정상 배치와 드리프트 배치의 `drift_check` | 미촬영 | | |
+| `logs/aiops.log` | `[WARN]` → `[INFO]` → `[OK]` 순서 | 미촬영 | | |
+| 재학습 후 `/predict` 응답 | 새 Production 버전 반영 | 미촬영 | | |
+
+### 다른 영역에 요청
+
+- A: 승격 후 `_model_cache`를 비우는 함수.
+- C: `fine_tune()` 반환에 `version`이 들어 있는지 확인.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | TODO 상태 기록 | 해당 없음 | main
 
-## 4. 대시보드
+---
 
-대상: `serving_app/static/index.html`
+## 4. 대시보드 구역 1 (예측·혼잡 카드) — 담당 D1
+
+### 대상 파일
+
+`serving_app/static/index.html`의 **예측·혼잡 등급 카드 블록**과 그 스크립트 (D2와 같은 파일. 각자 블록을 `<!-- D1 -->`, `<!-- D2 -->` 주석으로 감싸고 그 안만 고친다. 공통 CSS·상수는 E에게 요청)
+
+### 아키텍처
+
+- **역할**: 운영 담당자가 보는 첫 화면. "내일 도착 여객 예측 N명 · 등급"과 최근 20일 추이.
+- **구성 요소**: 예측 카드(예측값, 날짜, 혼잡 등급), 최근 20일 추이(표 또는 간단한 차트), 새로고침 버튼.
+- **흐름**: 페이지 로드 → `GET /data/status` → `recent` 20행 → `POST /predict` → `predicted_arrivals` → 등급 판정(Q3 40,177명 초과 혼잡 / Q1 34,962명 미만 여유 / 그 사이 보통) → 카드 표시. 업로드 데이터가 없으면 "데이터를 먼저 업로드하세요".
+- **다른 영역과의 연결**: C의 `recent` 필드가 있어야 동작. A의 `/predict` 응답 형식(`predicted_arrivals`, `model_version`)에 의존.
+- **설정**: 등급 경계 상수(`CONGESTION_HIGH = 40177`, `CONGESTION_LOW = 34962`, 이름은 구현 시 확정) — `data/README.md` 사분위와 같게.
+- **실행**: `http://localhost:8000/`
 
 ### 현재 상태
 
-- 스켈레톤이 제공하는 카드 4개가 있다: 공항 도착 여객 데이터 업로드, 드리프트 시뮬레이션, 드리프트 감지 기반 재학습 파이프라인, 재학습 로그.
-- 상수 `RMSE_THRESHOLD = 2700`, `DEFAULT_BASE_ARRIVALS = 37000`은 서버 값을 복제한 것이다. 서버 값을 바꾸면 함께 바꾼다.
-- 내일 예측값·혼잡 등급 카드: 미구현. 등급 경계 초안은 40,177명 초과 혼잡, 34,962명 미만 여유, 그 사이 보통이다.
-- 현재 Production 버전 표기: 미구현.
-- 카드가 `/predict`에 넣을 최근 20일 시퀀스를 어디서 가져올지: 미정. `GET /data/status`는 요약(행 수, 기간, 최소·최대)만 돌려준다.
+- 미구현. 스켈레톤에는 이 카드가 없다.
+- 입력 시퀀스 출처: C의 `GET /data/status` `recent` (미구현). 그 전에는 `data/jeju_airport_arrivals.csv` 마지막 20행을 직접 넣어 화면만 먼저 만든다.
+
+### 측정값
+
+| 항목 | 값 | 조건 |
+|---|---|---|
+| 페이지 로드 → 예측 표시까지 시간 | 미측정 | |
+| 표시된 예측값 / 등급 (실데이터 마지막 20일 기준) | 미측정 | |
+
+### 트러블슈팅
+
+(아직 없음)
+
+### 증빙
+
+| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
+|---|---|---|---|---|
+| 예측·혼잡 등급 카드 | 내일 예측값과 등급 | 미촬영 | | |
+| 최근 20일 추이 | `recent` 20행 | 미촬영 | | |
+
+### 다른 영역에 요청
+
+- C: `GET /data/status`의 `recent`.
+
+### 변경 기록
+
+- 2026-09-30 21:40 | 초기 작성 | 미구현 상태 기록 | 해당 없음 | main
+
+---
+
+## 5. 대시보드 구역 2·3 (배치 전송·버전·로그) — 담당 D2
+
+### 대상 파일
+
+`serving_app/static/index.html`의 **드리프트 시뮬레이션 카드, 재학습 로그 카드, Production 버전 표기 블록**과 그 스크립트 (D1과 같은 파일. `<!-- D2 -->` 블록 안만 고친다)
+
+### 아키텍처
+
+- **역할**: 운영 체계가 돌아가는 것을 보여주는 화면. 배치를 보내 드리프트 판정을 일으키고, 재학습 로그와 서비스 중인 모델 버전을 본다.
+- **구성 요소**
+  - 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. 여기에 **CSV 배치 전송**(`data/jeju_drift_batch_41rows.csv` 등 41행 파일을 읽어 `arrivals` 배열로 전송) 추가.
+  - 재학습 로그 카드(스켈레톤): `GET /logs/aiops.log` 주기 조회, `[WARN]`/`[INFO]`/`[OK]` 색 구분.
+  - Production 버전 표기: `GET /monitor/versions` → 버전·RMSE·생성 시각. 재학습 전후 변화 표시.
+- **흐름**: CSV 선택 → 파싱 → `batch-test` → `drift_check` 표시 → 로그 카드가 `[WARN]`→`[OK]` 갱신 → 버전 표기 갱신.
+- **다른 영역과의 연결**: B의 `BatchTestRequest` 형식(`arrivals`, 추가되면 `departures`). C의 `/monitor/versions`. 스켈레톤 상수 `RMSE_THRESHOLD = 2700`, `DEFAULT_BASE_ARRIVALS = 37000`은 서버 값 복제 — 서버가 바뀌면 함께 (E가 알린다).
+- **설정**: `RMSE_THRESHOLD`, `DEFAULT_BASE_ARRIVALS` (index.html 상단).
+- **실행**: `http://localhost:8000/`
+
+### 현재 상태
+
+- 스켈레톤 카드 4개가 있다: 데이터 업로드, 드리프트 시뮬레이션, 드리프트 감지 기반 재학습 파이프라인, 재학습 로그.
+- CSV 배치 전송: 미구현. Production 버전 표기: 미구현 (`/monitor/versions` 미구현).
+- 드리프트 시뮬레이션 카드는 `batch_test()`가 TODO라 지금은 빈 `predictions`를 받는다.
+
+### 측정값
+
+| 항목 | 값 | 조건 |
+|---|---|---|
+| CSV 배치 전송 후 `drift_check` 표시 | 미측정 | |
+| 로그 카드에 `[WARN]`→`[OK]` 반영까지 시간 | 미측정 | |
+| 재학습 전후 버전 표기 | 미측정 | |
+
+### 트러블슈팅
+
+(아직 없음)
+
+### 증빙
+
+| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
+|---|---|---|---|---|
+| CSV 배치 전송 결과 | `drift_check` 응답 | 미촬영 | | |
+| 재학습 로그 패널 | `[WARN]` → `[INFO]` → `[OK]` 순서 | 미촬영 | | |
+| Production 버전 표기 | 재학습 전후 버전 변화 | 미촬영 | | |
+
+### 다른 영역에 요청
+
+- C: `GET /monitor/versions`. B: `BatchTestRequest`에 `departures`를 넣을지 결정.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | 스켈레톤 카드 구성 기록 | 해당 없음 | main
 
-## 5. 데이터·상수
+---
 
-대상: `data/`, 코드 안의 운영 상수
+## 6. 데이터·상수·통합 — 담당 E
+
+### 대상 파일
+
+`data/` (CSV, `README.md`, `prepare_jeju_data.py`), `CLAUDE.md` 상수 표, `docs/PROJECT_PLAN.md`, 0번 표, 이 섹션
+
+### 아키텍처 (전체 흐름)
+
+프롬프트 4는 1~5번 "아키텍처"를 부품으로, 이 항목을 뼈대로 전체 구성도를 만든다.
+
+- **역할**: 부품이 하나의 파이프라인으로 이어지는지, 상수가 한 곳에서만 바뀌는지 본다.
+- **전체 흐름**
+  1. 데이터: 한국공항공사 일별 통계 → `scripts/prepare_jeju_data.py` → `data/jeju_airport_arrivals.csv` → 대시보드 업로드 → `data/uploads/` (C)
+  2. 학습·배포: baseline → MLflow 학습 → 게이트 2,700명 → Production (C)
+  3. 서빙: `MODEL_SOURCE=mlflow` → `/predict` (A) → 예측·혼잡 카드 (D1)
+  4. 모니터링: 배치 전송 (D2) → `batch-test` → RMSE > 임계값 → `[WARN]` → `fine_tune` → 게이트 → 승격 `[OK]` (B, C)
+  5. 반영: 캐시 비움 (A) → 새 버전으로 `/predict` → 버전 표기 (D2)
+- **경계**: 학습 코드(`train_and_register.py`)와 서빙 코드(`model_loader.py`)는 MLflow Registry(`models:/Airport_Arrivals_Predictor/Production`)로만 만난다. 모니터링은 `recent_predictions`(프로세스 메모리)와 `logs/aiops.log`(파일)로 상태를 남긴다. 서버 재시작이면 둘 다 초기화된다 (로그 파일은 남음).
+- **한 곳에서만 바꾸는 값**: 아래 상수 표. 바꾸면 `CLAUDE.md` 표, `index.html` 복제 상수(D2), ③ 운영 설계를 같은 PR에서.
 
 ### 현재 상태
 
@@ -127,32 +383,39 @@
 | MLflow 모델 이름 | `Airport_Arrivals_Predictor` | `serving_app/model_loader.py`, `serving_app/train_and_register.py` |
 
 - 결측 처리: 2023-01-24 (도착·출발 모두 0) 1건을 전날·다음날 평균으로 보간했다. 결항으로 급감한 날은 실제 값 그대로 둔다.
-- 확정 전 이슈: 게이트 여유가 129명으로 얇다. 시뮬레이션 변동성(1.2% / 3.6%)이 실데이터(8.4%)보다 낮다.
+- 팀 결정 대기: 드리프트 임계값 분리 여부, `batch-test`에 `departures` 전달 여부, 재학습 후 윈도우 초기화 (`docs/proposal/03_operations_design.md` 4번). 결정되면 여기에 날짜와 결론을 적는다.
+
+### 측정값 (사전 실험, 2026-10-01, 임시 복사본, PC 1대, 1회 — 본 레포 코드 아님)
+
+| 항목 | 값 |
+|---|---|
+| 2025-08-31까지(974행) 업로드 후 MLflow 학습 RMSE | 2,241명 |
+| 09-01 예측 / 실제 | 35,715명 / 33,819명 |
+| 정상 배치 2025-07-22~08-31 RMSE | 2,226명 (ok) |
+| 배치 2025-09-01~10-11 RMSE (출발 고정 / 실제 출발) | 3,715명 / 2,754명 |
+| 폭설 배치 RMSE | 6,224명 (v1), 6,385명 (v2) |
+| 재학습(09-01~10-11 드리프트 후) RMSE → 승격 | 1,858명 → v2 |
+| 학습 컷오프별 게이트 통과 | 2024-06-30 2,353 / 2024-08-31 2,626 / 2025-08-31 2,241 / 09-20 2,160 / 09-30 2,207 / 10-31 2,267 통과. 2025-01-08 3,310, 02-18 4,090, 05-31 3,385 실패 |
+| 평상시 하루 오차 (결항 제외) | 모델 2,275명(실제 출발) / 2,570명(고정 출발), 전일값 복사 2,502명 |
+| 학습에 안 쓰인 평상시 41일 배치 중 임계값 초과 비율 | 32% (고정 출발) / 13% (실제 출발) / 31% (전일값 복사) |
+
+통합 데모(본 레포 코드, 팀 PC): 미실행. 실행하면 순서·명령·결과를 여기에 적는다.
+
+### 트러블슈팅
+
+(아직 없음)
+
+### 증빙
+
+| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
+|---|---|---|---|---|
+| 통합 데모 한 바퀴 | 업로드 → 예측 → 드리프트 → 재학습 → 버전 변화 | 미촬영 | | |
+
+### 다른 영역에 요청
+
+(아직 없음)
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | 데이터와 상수 현재 값 기록 | 해당 없음 | main
-
-## 6. 트러블슈팅
-
-형식: `증상 → 원인 → 해결 명령 → 전후 결과`. 작성자와 시각을 함께 적는다. 맨 아래에 추가한다.
-
-(아직 없음)
-
-## 7. 증빙 목록 (기획서 ⑥)
-
-캡처 파일은 `docs/snapshots/`에 둔다. 찍은 사람이 자기 행을 채운다.
-
-| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
-|---|---|---|---|---|
-| `/predict` 응답 (로컬 모델) | `model_version`이 `v1-local` | 미촬영 | | |
-| `/predict` 응답 (MLflow 모델) | `model_version`이 `production`으로 전환 | 미촬영 | | |
-| `/predict` 422 응답 | 시퀀스 19개, 음수 값 입력이 거부됨 | 미촬영 | | |
-| `train_and_register.py` 실행 로그 | `[GATE PASSED]`와 RMSE | 미촬영 | | |
-| 컨테이너 빌드·실행 로그 | Docker로 재현됨 | 미촬영 | | |
-| 컨테이너의 Swagger 화면 | 컨테이너에서도 같은 API가 동작 | 미촬영 | | |
-| `simulate_drift.py` 실행 결과 | 정상 배치와 드리프트 배치의 `drift_check` | 미촬영 | | |
-| 재학습 로그 패널 | `[WARN]` → `[INFO]` → `[OK]` 순서 | 미촬영 | | |
-| 재학습 후 `/predict` 응답 | 새 Production 버전 반영 | 미촬영 | | |
-| 대시보드 예측·혼잡 등급 카드 | 내일 예측값과 등급 | 미촬영 | | |
-| 대시보드 Production 버전 표기 | 재학습 전후 버전 변화 | 미촬영 | | |
+- 2026-10-01 | E | 섹션을 담당자별로 재편, 아키텍처·측정값·증빙을 섹션 안으로 이동, 사전 실험 수치 기록 | 해당 없음 | main
