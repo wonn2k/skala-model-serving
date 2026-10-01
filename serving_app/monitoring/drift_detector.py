@@ -50,10 +50,9 @@ def assess(recent_predictions: list[dict]) -> dict:
         "anomalies": anomalies,
         "rmse_excl_anomalies": compute_rmse(rest),
         "bias_excl_anomalies": compute_bias(rest),
-        # 드리프트 = 이상치를 뺀 오차가 크고(RMSE) 한쪽으로 치우침(bias). 치우침 없는 큰 오차는 변동이 큰 기간이지 수준 변화가 아니다.
-        "drift": len(window) >= WINDOW_SIZE
-        and compute_rmse(rest) > RMSE_THRESHOLD
-        and abs(compute_bias(rest)) > BIAS_THRESHOLD,
+        # 드리프트 = 이상치를 뺀 오차가 한쪽으로 치우침(bias). RMSE >= |bias|라 RMSE 조건은 따로 두지 않는다.
+        # 치우침 없는 큰 오차(RMSE > RMSE_THRESHOLD)는 변동이 큰 기간이지 수준 변화가 아니라 알림만 (retrain_trigger).
+        "drift": len(window) >= WINDOW_SIZE and abs(compute_bias(rest)) > BIAS_THRESHOLD,
     }
 
 
