@@ -40,7 +40,7 @@
 | 대시보드 예측값·혼잡 등급 카드 | D1 (프론트엔드) | 미구현 | |
 | 대시보드 CSV 배치 전송, Production 버전 표기 | D2 (프론트엔드) | 미구현 | 업로드·드리프트 시뮬레이션·재학습 로그 카드는 스켈레톤에 있음 |
 | Docker 컨테이너 재현 | C | 미확인 | TODO 1 구현 전에는 기동 실패 예상 (2번 참고) |
-| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 미실행 | 본 레포 코드로는 미실행. 사전 실험은 5번 참고 |
+| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 미실행 (`main`) / 브랜치 실측 | `main` 코드로는 미실행. `exp/clean-cancellation`에서 서버 경유 한 바퀴 실측 — 드리프트 → v2 → 반등 → v3 → 게이트 실패 → 롤백 v2 (3번, 5번) |
 
 ---
 
@@ -129,7 +129,7 @@
   - A: `MLFLOW_MODEL_URI = models:/Airport_Arrivals_Predictor/Production`을 읽는다. Registry 이름·스테이지를 바꾸면 A도 바뀐다.
   - B: `fine_tune(rows)`를 호출하고 반환 `{"promoted", "rmse", "version"}`을 쓴다. 반환 형식을 바꾸면 B도 바뀐다.
   - D1: `GET /data/status`의 `recent`를 읽는다. D2: `GET /monitor/versions`를 읽는다.
-- **설정**: `RMSE_GATE = 2700.0`, `SEED = 42`, `BASE_EPOCHS = 100`, `FINE_TUNE_EPOCHS = 10`, `FINE_TUNE_LR = 1e-4`, `MODEL_NAME`. MLflow 저장소는 cwd의 `mlflow.db`, `mlruns/`.
+- **설정**: `RMSE_GATE = 2700.0`, `SEED = 42`, `BASE_EPOCHS = 100`, `FINE_TUNE_EPOCHS = 3` (원본·`main` 10 — 브랜치 `exp/clean-cancellation`에서만 변경, 아래 현재 상태), `FINE_TUNE_LR = 1e-4`, `MODEL_NAME`. MLflow 저장소는 cwd의 `mlflow.db`, `mlruns/`.
 - **실행**: `python scripts/train_baseline_v1.py` → `python serving_app/train_and_register.py` / `docker compose -f serving_app/docker-compose.yml up --build`
 
 ### 현재 상태
@@ -142,15 +142,17 @@
 - `GET /data/status`의 `recent`: 미구현. 설계: 최신 업로드의 마지막 `SEQ_LEN`(20)행, 오래된 순, `[{date, arrivals, departures}]` 정수.
 - `GET /monitor/versions`: 미구현. 설계: `docs/API_SPEC.md`.
 - Docker: 미확인. TODO 1이 구현되기 전에는 컨테이너 기동이 실패할 것으로 예상된다.
+- **브랜치 `exp/clean-cancellation`**: `FINE_TUNE_EPOCHS` 10 → **3**. 학습 데이터가 결항일 보간본으로 바뀌어(5번) base 모델이 입력 수준을 따라가게 되자, fine-tune은 많이 돌릴수록 최근 3주에 과적합해 게이트 실패가 늘었다 (3번 실험 6: bias 500 트리거에서 epoch 3 / 10 / 30 → 재학습 16 / 21 / 30회, 게이트 실패 3 / 8 / 16회, 2025 RMSE 3,010 / 3,031 / 3,092). CLAUDE.md "학습/재학습 흐름 변경 금지"에 해당하므로 `main` 반영은 팀 합의 뒤. 원본 스켈레톤(a8ffe33)부터 `main`까지 epoch 값은 바뀐 적 없다 (`git log -S FINE_TUNE_EPOCHS`).
 
 ### 측정값
 
 | 항목 | 값 | 조건 (PC, 명령) |
 |---|---|---|
-| Day1 baseline RMSE | 2,571명 | PC 1대, `python scripts/train_baseline_v1.py` |
-| Day2 MLflow 학습 RMSE | 2,267명 (2266.94) | PC 1대, `python serving_app/train_and_register.py` |
+| Day1 baseline RMSE | 2,571명 | PC 1대, `python scripts/train_baseline_v1.py` (main, 보간 전 데이터) |
+| Day2 MLflow 학습 RMSE | 2,267명 (2266.94) | PC 1대, `python serving_app/train_and_register.py` (main, 보간 전 데이터) |
+| 보간 데이터 base 학습 (브랜치) | ≤2024-06-30 547행: baseline 1,999 / MLflow 게이트 1,961 · ≤2025-08-31 974행: baseline 2,065 / MLflow 2,094 | `exp/clean-cancellation` 워크트리, 같은 명령. baseline은 seed 미고정이라 실행마다 다름 (1,999 / 2,075 / 2,170) |
 | 다른 PC에서의 게이트 통과 여부 | 미측정 | |
-| 학습 소요 시간 (100 epoch) | 미측정 | |
+| 학습 소요 시간 (100 epoch) | baseline 24~33초, MLflow 학습+등록 36~46초 (547행 / 974행) | 브랜치 워크트리, PC 1대, 서브프로세스 전체 시간 |
 | 컨테이너 빌드 시간 / 기동 성공 여부 | 미측정 | |
 | `GET /monitor/versions` 응답 예시 | 미측정 | |
 
@@ -175,6 +177,7 @@
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | Day1·Day2 실행 결과 기록 | Day1 RMSE 2,571명 (`python scripts/train_baseline_v1.py`), Day2 RMSE 2,267명 (`python serving_app/train_and_register.py`) | main
+- 2026-10-01 | 실험 | `FINE_TUNE_EPOCHS` 10 → 3 (보간 데이터 + bias 500과 묶음) | 보간 데이터 게이트 RMSE 1,961 (≤2024-06-30) / 2,094 (≤2025-08-31). epoch 3/10/30 비교는 3번 실험 6 | exp/clean-cancellation (main 미반영)
 
 ---
 
@@ -189,7 +192,7 @@
 - **역할**: 예측·실제 쌍을 쌓아 오차를 감시하고, 임계값을 넘으면 알림 → 최근 데이터로 fine-tuning → 게이트 재검증 → 재배포까지 사람 없이 잇는다.
 - **구성 요소**
   - `routers/predict.py` `batch_test()` (**TODO 3**): `BatchTestRequest.arrivals` 41개 → 길이 20 슬라이딩 윈도우 21개 → 각 윈도우로 예측(출발 여객은 `SIMULATED_DEPARTURES` 고정) → `recent_predictions`에 `{"predicted", "actual"}` 누적(최근 21건 유지) → `check_and_trigger()` → `BatchTestResponse(predictions, drift_check)`.
-  - `drift_detector.py`: `compute_rmse()` (**TODO 2**), `compute_bias()` (평균 오차 = 실제 − 예측), `assess(window)` → `{rmse, bias, anomalies, rmse_excl_anomalies, bias_excl_anomalies, drift}`. **세 종류 판정**: 하루 오차 > `ANOMALY_THRESHOLD`(10,000)인 날은 이상치로 빼고, 나머지의 |bias| > `BIAS_THRESHOLD`(1,500)이면 **수준 드리프트**(재학습). bias 작은데 RMSE > `RMSE_THRESHOLD`(2,700)이면 **구조 드리프트**(알림만). RMSE ≥ |bias|가 항상 성립해 드리프트 조건에 RMSE 항은 없다. `is_drift()`는 `assess()["drift"]`.
+  - `drift_detector.py`: `compute_rmse()` (**TODO 2**), `compute_bias()` (평균 오차 = 실제 − 예측), `assess(window)` → `{rmse, bias, anomalies, rmse_excl_anomalies, bias_excl_anomalies, drift}`. **세 종류 판정**: 하루 오차 > `ANOMALY_THRESHOLD`(10,000)인 날은 이상치로 빼고, 나머지의 |bias| > `BIAS_THRESHOLD`(500)이면 **수준 드리프트**(재학습). bias 작은데 RMSE > `RMSE_THRESHOLD`(2,700)이면 **구조 드리프트**(알림만). RMSE ≥ |bias|가 항상 성립해 드리프트 조건에 RMSE 항은 없다. `is_drift()`는 `assess()["drift"]`.
   - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): `assess()` → 이상치 있으면 `[WARN] anomaly` → 드리프트 아니면 `ok` / `anomaly` / `structure_drift`(오차 크지만 치우침 없음, 재학습 안 함) 반환 → 드리프트면 `[WARN] drift` → 이전 Production 버전 기억 → `latest_upload()` 최근 41행 → `fine_tune()` → 승격 시 `reset_cache()` + 판정 윈도우 `clear()` + `[OK]`. 게이트 실패는 그냥 실패 (재시도 간격 없음, 다음 배치에서 다시 판정). **롤백**: 승격 뒤 첫 판정이 드리프트이고 그 재학습이 게이트에 실패하면 `[ROLLBACK]` — 새 버전 Archived, 이전 버전 Production, `reset_cache()`. 승격 뒤 드리프트 아닌 윈도우가 한 번 나오면 승격 확정(롤백 대상에서 제외). 승격 기록은 프로세스 메모리(`_last_promotion`)에만 있다.
   - `scripts/simulate_drift.py` `send_batch()` (**TODO 5**): 랜덤워크 41일(정상 σ 1.2% / 드리프트 σ 3.6%)을 `/predict/batch-test`로 전송.
   - 로그: `aiops` 로거 → `logs/aiops.log` (`main.py`가 연결) → `GET /logs/aiops.log`로 대시보드가 읽는다.
@@ -198,14 +201,15 @@
   - A: `model_loader.get_model()`로 예측, 승격·롤백 뒤 `model_loader.reset_cache()` 호출.
   - C: `fine_tune(rows)`의 반환 `{"promoted", "rmse", "version"}`에 의존. `latest_upload()`로 재학습 데이터를 얻는다. 롤백은 `MlflowClient.transition_model_version_stage`로 Registry 스테이지를 직접 바꾼다.
   - D2: 배치를 보내는 쪽. `drift_check.status`가 `ok | anomaly | structure_drift | retrain_triggered | rolled_back` 다섯 가지로 늘었다.
-- **설정**: `RMSE_THRESHOLD = 2700.0`, `BIAS_THRESHOLD = 2000.0`, `ANOMALY_THRESHOLD = 10000.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`, 시뮬레이션 σ 1.2% / 3.6%.
+- **설정**: `RMSE_THRESHOLD = 2700.0`, `BIAS_THRESHOLD = 500.0`, `ANOMALY_THRESHOLD = 10000.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`, 시뮬레이션 σ 1.2% / 3.6%.
 - **실행**: `python scripts/simulate_drift.py` (서버 기동 후) / 실데이터 배치: `data/jeju_drift_batch_41rows.csv`의 `arrivals` 41개를 `POST /predict/batch-test`
 
 ### 현재 상태
 
-- 이 브랜치(`exp/drift-anomaly`)에서 TODO 2~5 이식됨 (힌트 코드 그대로). `main`에는 아직 TODO 상태.
+- 브랜치(`exp/drift-anomaly` → `exp/clean-cancellation`)에서 TODO 2~5 이식됨 (힌트 코드 그대로). `main`에는 아직 TODO 상태.
 - 판정: 세 종류 (이상치 / 수준 드리프트 / 구조 드리프트) + 롤백. 위 아키텍처 참고. 스켈레톤의 "RMSE > 2,700이면 재학습"에서 바뀐 것이라 **팀 결정 필요** — 이 브랜치에서만 적용, `main`은 스켈레톤 그대로.
-- **확정값 (2026-10-01, 브랜치)**: 수준 드리프트 |bias| > **1,500**, 게이트 **2,700**, 이상치 10,000. 근거는 아래 실험 5. 재시도 간격은 두지 않는다(실패는 그냥 실패).
+- **확정값 (2026-10-01, `exp/clean-cancellation`)**: 수준 드리프트 |bias| > **500**, 게이트 **2,700**, 이상치 10,000, fine-tune **3 epoch**. 재시도 간격은 두지 않는다(실패는 그냥 실패). 근거는 아래 실험 6. 이전 확정값 1,500(실험 5)은 결항일 포함 학습 데이터 기준이었다 — 학습 데이터를 보간본으로 바꾸자(5번) 21일 bias가 ±1,000 안에서 움직여 1,500으론 2025년에 3월 한 번만 걸리고, 2,000 이상은 한 번도 안 걸린다. 500은 윈도우가 찰 때마다 작은 수준 변화도 따라가 사실상 "승격 뒤 3주마다 재학습 + 게이트 실패일엔 매일 재시도"가 된다.
+- RMSE만으로 판정하면 안 되는 이유(실험 6): 보간 모델도 21일 RMSE > 2,700인 날이 107일(2~5월, 9~10월)이고, RMSE 트리거 10회 중 7회는 bias ±800 안쪽(수준은 그대로, 흔들림만 큼). 재학습 3배에 RMSE 개선 0 (3,039 vs 재학습 없음 3,038).
 - 구조 드리프트의 실체: 기간별로 주간 리듬 ac(7)이 0.17(2024 H1) → 0.67(2025 Q3), 요일 진폭이 1,756 → 5,320으로 커졌다. 수준은 같은데 변동 폭이 바뀐 것이라 bias로 안 잡히고, 41행 fine-tuning으로도 안 줄어든다 (실험 2: 3,142 → 3,238). 9~10월 배치가 이 경우다.
 - 남은 이슈: 출발 여객 고정값이 250~950명의 오차를 더한다 (`departures` 전달 여부 미결). 재학습 후 판정 윈도우 초기화 안 함. `_last_promotion`이 메모리에만 있어 서버 재시작 후 롤백 불가.
 - 폭설 배치를 넣으면 이상치 3일을 뺀 나머지도 드리프트(2025-01~02 수요 하락 실제)라 재학습이 돈다. 이때 재학습 데이터는 "최신 업로드의 마지막 41행"이라 배치와 무관한 기간일 수 있다 — 시연 순서에서 업로드 순서를 지켜야 한다.
@@ -229,7 +233,24 @@
 | **실험 5** 재학습 정책 시뮬레이션 (2025-01-21~08-31 하루씩 전진, 실제 fine-tune, 승격 시 윈도우 초기화, 결항 포함 RMSE) | v1 고정 4,201 / bias>2,000 4,100 (재학습 13, 승격 4) / **bias>1,500 3,942 (9, 6)** / bias>1,000 3,943 (21, 8) / bias>500 3,993 (28, 9) / bias>500·게이트 3,500 4,032 (20, 9) / bias>500·게이트 없음 4,166 (10, 10) / 21일마다 무조건 3,891 (11, 4) / 20일 이동평균 3,651 / 전일값 3,462 | 스크래치 `sim_policy.py`, `sim2.py`. 1,500이 재학습 최소·RMSE 최저. 게이트 없으면 v1 고정 수준으로 악화 |
 | 모델 특성 (2025-05~08, 결항 없음) | LSTM 2,398 vs 전일값 2,083 / 7일 MA 2,380 / 상수(학습평균) 2,446 / 20일 MA 2,543. 예측 std 460 vs 실제 2,444. 20일 MA와 상관 0.927. 전일 대비 방향 적중 67% (MA 63%, 동전 50%) | 변화량 자기상관 lag1 −0.18(평균 회귀), lag7 +0.36(주간). 수준+약한 주기만 배움, 진폭은 MSE가 줄임 |
 | `simulate_drift.py` 랜덤워크 배치 | 미측정 | |
-| 서버(`/predict/batch-test`) 경유 재현 | 미측정 | |
+| 서버(`/predict/batch-test`) 경유 재현 | 아래 "보간 데이터 실측" | |
+
+**보간 데이터 실측** — 브랜치 `exp/clean-cancellation` (학습 CSV 결항일 보간, bias 500, fine-tune 3 epoch), 임시 워크트리, `MODEL_SOURCE=mlflow uvicorn ... --port 8011` 서버에 실제 요청, PC 1대, 1회. 배치 입력은 raw. 레지스트리 번호는 재실행으로 이어져 로그엔 v4·v5·v6로 찍혔다 (아래는 상대 번호).
+
+| 항목 | 값 | 조건 |
+|---|---|---|
+| v1 학습 (~2024-06-30, 547행) | baseline 1,999 / MLflow 게이트 **1,961** → v1 | 보간 전 2,353 |
+| `/predict` (06-11~06-30 입력) | 33,339.53 · 첫 호출 8.8초(lazy 로드), 재호출 2.1초 | |
+| 정상 배치 2024-10-01~11-10 (v1, 학습 밖) | RMSE 899 / bias −241 → `ok` | 보간 전 모델의 정상 배치 2024-04-15~05-25는 보간 모델로 이상치 1일(05-06 30,879 vs 41,795) `anomaly` 라 교체 |
+| 드리프트 배치 2024-12-12~2025-01-21 (v1) | 이상치 1일(01-09 결항 17,093 vs 29,523) 제외 RMSE 2,656 / bias **−1,041** → 재학습 게이트 1,338 → **v2** (16.7초) | 업로드 ~2025-01-21 |
+| `/predict` 재학습 후 (01-02~01-21 입력) | 30,622.54 (v2) | |
+| 확정 배치 2025-01-02~02-11 (v2) | 이상치 1일(02-07) 제외 RMSE 3,169 / bias +199 → `structure_drift` (재학습 없음) → v2 승격 확정 | |
+| 반등 배치 2025-01-16~02-25 (v2) | 이상치 1일(02-07) 제외 RMSE 2,456 / bias **+686** → 재학습 게이트 902 → **v3** (14.7초) | 업로드 ~2025-02-25 |
+| 롤백 배치 2025-02-06~03-18 (v3) | RMSE 3,474 / bias **−1,008** → 재학습 게이트 **실패 2,742** → `[ROLLBACK]` v3 Archived, **v2** Production (14.7초) | 업로드 ~2025-03-18. 2,742 vs 2,700 간발 — 다른 PC 재확인 필요 |
+| `/predict` 롤백 후 (02-27~03-18 입력) | 31,309.10 (v2) | |
+| 폭설 배치 2025-01-09~02-18 (v2) | 이상치 1일(02-07 6,088 vs 29,242) 제외 RMSE 3,039 / bias −103 → `structure_drift` | |
+| 시연 순서(≤2025-08-31 학습) | v1 게이트 2,094 · 정상 07-22~08-31 2,183 / −117 `ok` · 9~10월 배치 09-01~10-11 3,490 / **−587** → 재학습 2,098 → v2 · 폭설 이상치 1일 제외 2,981 / +214 `structure_drift` | `data/README.md` "시연 순서". 보간 전엔 9~10월 배치가 오탐 사례였음 |
+| **실험 6** 보간 모델 트리거 시뮬레이션 (2025-01-01~10-31 하루씩 전진, raw 입력, 출발 37,000, 실제 fine-tune·게이트·롤백, 결항 포함 RMSE) | 재학습 없음 3,038 · bias>1,500 / ep10 3,058 (재학습 3, 승격 2) · bias>2,000·2,500·3,000 = 재학습 0 · RMSE>2,700 3,039 (10, 6) · RMSE>3,000 3,069 (6, 6) · bias>290 ep3 3,010 (16, 12) / ep10 3,031 (21, 13) / ep30 3,092 (30, 12) · bias>400 ep3 3,011 (13, 11) · **bias>500 ep3 3,017 (10, 9, 롤백 1)** | 스크래치 `sim_clean.py`, `sim_rmse.py`, `sim_290.py`, `sim_500.py`. v1 고정 21일 bias 최대 −1,989(3월). 어느 설정도 9~10월 구조 드리프트는 못 줄여 전체 RMSE 3,000대 유지. 그래프: 아티팩트 "보간 모델 임계값 시뮬레이션", "bias 290 epoch 비교" |
 
 ### 트러블슈팅
 
@@ -256,6 +277,7 @@
 - 2026-09-30 21:40 | 초기 작성 | TODO 상태 기록 | 해당 없음 | main
 - 2026-10-01 | 실험 | TODO 2~5 이식, 두 층 판정(이상치/드리프트, bias 조건), 롤백 추가 | 위 측정값 표 전체. 실행: 스크래치 worktree에서 in-process (`exp4*.py`, `scan_ft.py`) | exp/drift-anomaly
 - 2026-10-01 | 실험 | 판정을 bias만으로, 롤백 조건을 "승격 뒤 첫 재학습 게이트 실패"로, `BIAS_THRESHOLD` 1,500 확정, 승격 시 윈도우 초기화, `high_error` → `structure_drift` | 실험 5 (정책 시뮬레이션) 및 전체 루프 재실행 — 정상 ok → 드리프트 v2 → 재학습 실패 롤백 v1 → ok → 구조 드리프트 알림 → 폭설 재학습 실패 유지 | exp/drift-anomaly (main 미반영)
+- 2026-10-01 | 실험 | 학습 데이터 결항일 보간(5번)에 맞춰 `BIAS_THRESHOLD` 1,500 → 500, fine-tune 3 epoch(2번). 시연 배치 재선정 | 실험 6 + 서버 경유 전체 루프 실측 (위 "보간 데이터 실측"): ok → −1,041 v2 → 확정 → +686 v3 → −1,008 게이트 2,742 실패 롤백 v2 → 폭설 structure_drift. 하루 전진 시뮬레이션과 수치 일치 | exp/clean-cancellation (main 미반영)
 
 ---
 
@@ -345,25 +367,27 @@
 
 | 항목 | 값 | 위치 |
 |---|---|---|
-| 학습 데이터 | 제주공항 일별 여객 2023-01-01 ~ 2025-10-31, 1,035일 | `data/jeju_airport_arrivals.csv` |
-| 드리프트 시연 데이터 | 2025-01-09 ~ 2025-02-18, 41일 (폭설 결항일 17,093명·6,088명 포함) | `data/jeju_drift_batch_41rows.csv` |
-| 도착 여객 평균 / 중앙값 | 37,218명 / 37,820명 | `data/README.md` |
-| 도착 여객 표준편차 | 4,413명 | `data/README.md` |
-| 도착 여객 최소 / 최대 | 1,042명 / 46,954명 | `data/README.md` |
-| 사분위 Q1 / Q3 | 34,962명 / 40,177명 | `data/README.md` |
-| 일별 변화율 표준편차 | 19.6% (전체) / 8.4% (2만 명 미만 결항일 제외) | `data/README.md` |
-| 전일값 복사 RMSE | 3,600명 | `data/README.md` |
+| 학습 데이터 | 제주공항 일별 여객 2023-01-01 ~ 2025-10-31, 1,035일. **브랜치: 도착 25,000명 미만 18일 보간** (`CANCEL_ARRIVALS`) | `data/jeju_airport_arrivals.csv`, `scripts/prepare_jeju_data.py` |
+| 이상치 시연 데이터 | 2025-01-09 ~ 2025-02-18, 41일 raw (폭설 결항일 17,093명·6,088명 포함) | `data/jeju_drift_batch_41rows.csv` |
+| 드리프트 시연 컷 (브랜치) | 학습 ≤2024-06-30 · 업로드 ≤01-21·02-25·03-18 · 배치 정상(2024-10-01~11-10) / 드리프트(12-12~01-21) / 확정(01-02~02-11) / 반등(01-16~02-25) / 롤백(02-06~03-18) — 배치는 raw, 학습 컷은 보간본 | `data/jeju_demo_drift_*.csv` 9개, `data/README.md` "드리프트 시연 순서" |
+| 도착 여객 평균 / 중앙값 | 37,425명 / 37,822명 (보간본 · raw 37,218 / 37,820) | `data/README.md` |
+| 도착 여객 표준편차 | 3,809명 (raw 4,413) | `data/README.md` |
+| 도착 여객 최소 / 최대 | 25,168명 / 46,954명 (raw 최소 1,042) | `data/README.md` |
+| 사분위 Q1 / Q3 | 35,049명 / 40,177명 | `data/README.md` |
+| 일별 변화율 표준편차 | 7.3% (raw 19.6%, raw 결항 제외 8.4%) | `data/README.md` |
+| 전일값 복사 RMSE | 2,523명 (raw 3,600) | `data/README.md` |
 | 배포 게이트 `RMSE_GATE` | 2,700명 | `serving_app/train_and_register.py`, `scripts/train_baseline_v1.py` |
-| 드리프트 임계값 `RMSE_THRESHOLD` | 2,700명 | `serving_app/monitoring/drift_detector.py` |
+| 드리프트 임계값 `RMSE_THRESHOLD` | 2,700명 (브랜치에선 구조 드리프트 알림 전용) | `serving_app/monitoring/drift_detector.py` |
 | 판정 윈도우 `WINDOW_SIZE` | 21건 | `serving_app/monitoring/drift_detector.py` |
-| 드리프트 bias 기준 `BIAS_THRESHOLD` (브랜치) | 1,500명 | `serving_app/monitoring/drift_detector.py` — `exp/drift-anomaly`에서 확정, `main`에는 없음 |
-| 이상치 기준 `ANOMALY_THRESHOLD` (브랜치) | 하루 오차 10,000명 | `serving_app/monitoring/drift_detector.py` — `exp/drift-anomaly`, 팀 결정 전 |
+| 드리프트 bias 기준 `BIAS_THRESHOLD` (브랜치) | **500명** (`exp/drift-anomaly`에선 1,500) | `serving_app/monitoring/drift_detector.py` — `exp/clean-cancellation`, `main`에는 없음 |
+| 이상치 기준 `ANOMALY_THRESHOLD` (브랜치) | 하루 오차 10,000명 | `serving_app/monitoring/drift_detector.py` — 팀 결정 전 |
+| fine-tune epoch `FINE_TUNE_EPOCHS` (브랜치) | **3** (`main` 10) | `serving_app/train_and_register.py` — 2번 참고, 팀 합의 필요 |
 | 입력 시퀀스 길이 `SEQ_LEN` | 20일 | `data/features.py` |
 | 시뮬레이션 고정 출발 여객 `SIMULATED_DEPARTURES` | 37,000명 | `serving_app/routers/predict.py` |
 | MLflow 모델 이름 | `Airport_Arrivals_Predictor` | `serving_app/model_loader.py`, `serving_app/train_and_register.py` |
 
-- 결측 처리: 2023-01-24 (도착·출발 모두 0) 1건을 전날·다음날 평균으로 보간했다. 결항으로 급감한 날은 실제 값 그대로 둔다.
-- 팀 결정 대기: 드리프트 임계값 분리 여부, `batch-test`에 `departures` 전달 여부, 재학습 후 윈도우 초기화 (`docs/proposal/03_operations_design.md` 4번). 결정되면 여기에 날짜와 결론을 적는다.
+- 결측·결항 처리 (브랜치 `exp/clean-cancellation`): 도착 < 25,000인 날 18일(2023-01-24 결측 포함)을 양옆 가장 가까운 정상일 평균으로 보간한다. `main`은 2023-01-24 1건만 보간. 이유와 효과는 `data/README.md` "가공 규칙" — 결항일이 스케일러를 압축하고 MSE를 지배해 모델이 20일 이동평균으로 퇴화하던 것이 풀린다 (평상시 RMSE 2,415 → 1,807, 예측 표준편차 445 → 1,898). 시도했다 버린 것: 요일·공휴일·연휴 피처 (`exp/calendar-features`, 2,344 → 2,695로 악화), 학습 기간 축소, 로그 변환 등 데이터 변형 A~G 중 보간(B)만 효과.
+- 팀 결정 대기: 보간 규칙·bias 500·fine-tune 3 epoch의 `main` 반영, `batch-test`에 `departures` 전달 여부 (`docs/proposal/03_operations_design.md` 4번). 결정되면 여기에 날짜와 결론을 적는다.
 
 ### 측정값 (사전 실험, 2026-10-01, 임시 복사본, PC 1대, 1회 — 본 레포 코드 아님)
 
@@ -379,11 +403,12 @@
 | 평상시 하루 오차 (결항 제외) | 모델 2,275명(실제 출발) / 2,570명(고정 출발), 전일값 복사 2,502명 |
 | 학습에 안 쓰인 평상시 41일 배치 중 임계값 초과 비율 | 32% (고정 출발) / 13% (실제 출발) / 31% (전일값 복사) |
 
-통합 데모(본 레포 코드, 팀 PC): 미실행. 실행하면 순서·명령·결과를 여기에 적는다.
+통합 데모(본 레포 코드, 팀 PC): 미실행. 브랜치 `exp/clean-cancellation` 코드로는 임시 워크트리에서 한 바퀴 실측 (3번 "보간 데이터 실측", `data/README.md` 두 시연 순서). 실행: 워크트리에서 `MODEL_SOURCE=mlflow uvicorn serving_app.main:app --port 8011` → `/data/upload` → `python scripts/train_baseline_v1.py` → `python serving_app/train_and_register.py` → `/predict`, `/predict/batch-test` 순서 호출 (스크래치 `e2e_clean.py`).
 
 ### 트러블슈팅
 
-(아직 없음)
+- 2026-10-01 | 실험 | 시연 확인 스크립트에서 학습 서브프로세스가 0초 만에 끝나고 모델이 없음 | 원인: `subprocess.run(["python", ...])`이 venv가 아닌 시스템 Python(`C:\Python312`, tensorflow 없음)을 잡음 | 해결: `sys.executable`로 호출 | 팀 PC에서도 `python`이 venv를 가리키는지 (`.venv\Scripts\Activate.ps1`) 먼저 확인
+- 2026-10-01 | 실험 | 워크트리 `mlruns/`를 지워도 레지스트리 버전 번호가 v4부터 이어짐 | 원인: 레지스트리는 cwd의 `mlflow.db`(sqlite)에 있고 `mlruns/`는 아티팩트만 | 해결: `mlflow.db`도 함께 삭제 | 시연 PC에서 "v1부터" 보여주려면 `mlflow.db`, `mlruns/`, `data/uploads/*.csv`, `serving_app/models/*.keras|pkl`을 모두 비우고 시작
 
 ### 증빙
 
@@ -399,3 +424,4 @@
 
 - 2026-09-30 21:40 | 초기 작성 | 데이터와 상수 현재 값 기록 | 해당 없음 | main
 - 2026-10-01 | E | 섹션을 담당자별로 재편, 아키텍처·측정값·증빙을 섹션 안으로 이동, 사전 실험 수치 기록 | 해당 없음 | main
+- 2026-10-01 | 실험 | `prepare_jeju_data.py`에 결항일(도착 < 25,000) 보간 추가, `jeju_airport_arrivals.csv`·학습 컷 4개 재생성, 드리프트 시연 컷 재선정(배치 raw / 학습 보간본), `falsealarm` 배치를 `sep_oct`로 개명 | `python scripts/prepare_jeju_data.py` → 18일 보간, 1,035행. 기초 통계 보간본 기준으로 갱신. 루프 실측은 3번 | exp/clean-cancellation (main 미반영)
