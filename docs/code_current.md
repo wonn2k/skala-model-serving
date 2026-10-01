@@ -439,6 +439,8 @@ function batchArrivals(kind, n) {
 
 ### 아키텍처
 
+- [D2] 디자인 1/2: 블루·자주 CSS 토큰, 카드·입력·버튼·표의 간격 및 반응형 스타일. 화면 배치·그래프 표현은 후속 디자인 PR에서 적용한다.
+
 - **역할**: 운영 담당자가 보는 화면 하나. 위쪽은 "내일 도착 여객 예측 N명 · 등급"(D1), 아래쪽은 운영 체계가 돌아가는 것을 보여주는 배치 전송·재학습 로그·모델 버전(D2).
 - **구성 요소**
   - [D1] 예측 카드 (`#forecast-card`, 업로드 카드 바로 위): 예측값(천 단위 구분, 명), 혼잡 등급 배지(`.pill.ok/.warn/.err` 재사용), 기준일(입력 마지막 날) → 예측일, `model_version`·`model_registry_version`(응답 그대로), `/predict` 왕복 ms(`performance.now()`), 최근 20일 추이(라이브러리 없이 div 막대 20개 + MM-DD 라벨, 마우스 오버 시 날짜·값), 새로고침 버튼. 실패 시 원문은 `.result-box`에 표시. 함수: `loadForecast()`(흐름 전체), `toSequence()`(Number → 정수 변환), `congestionLevel()`(등급), `summarize422()`(422 detail 요약), `renderForecast()`(상태 4종), `renderTrend()`(막대).
@@ -456,6 +458,8 @@ function batchArrivals(kind, n) {
 
 ### 현재 상태
 
+- [D2] 사용자 전체 UI 개편 요청에 따라 공통 CSS를 수정했다. 기존 JavaScript·API·데이터 처리·임계값은 변경하지 않았다. 후속 마크업을 위한 스타일을 포함한다.
+
 - [D1] 예측·혼잡 등급 카드: 구현 (`feat/d1-forecast-card`). 상태 4종(업로드 전 / 로딩 / 성공 / 실패)을 표시한다. 예측·실패가 다른 카드 초기화를 막지 않는다.
 - [D1] 입력 출처: C의 `GET /data/status` `recent` 연결 완료 (main #6). 최신 업로드 파일의 마지막 20행으로 예측한다. 임시 상수(`FALLBACK_RECENT`)와 "임시 데이터" 배지는 제거했다. `recent`가 20행 배열이 아니면 "GET /data/status의 recent가 20행 배열이 아닙니다" 실패 상태를 띄운다.
 - [D1] "내일"은 실제 내일이 아니라 입력 마지막 날 다음날이다 (`data/jeju_airport_arrivals.csv` 업로드 기준 2025-10-31 → 2025-11-01). 카드에 기준일·예측일을 함께 표시한다.
@@ -471,6 +475,8 @@ function batchArrivals(kind, n) {
 - [D2] (D1 작성) 두 배치 비교는 #14의 `sendBatch(kind, csvArrivals)`에 붙였다: 전송 시작 시 `batchTarget(kind)`로 칸·출처를 정하고, 성공하면 `lastBatchBySlot`에 보관 후 `renderCompare()`. 결과는 페이지 메모리에만 있다(새로고침하면 빈 칸). 버튼 비활성화·상태 배지·파이프라인 단계는 #14 구현을 그대로 쓴다.
 
 ### 측정값
+
+- [D2] 테마 PR: main 5f3c616 대비 JavaScript 원문 동일, 기존 DOM ID 보존 확인. node 문법 검사·compileall 통과. 디자인 단계의 추가 학습 및 품질 비교는 미측정.
 
 | 항목 | 값 | 조건 |
 |---|---|---|
@@ -498,6 +504,8 @@ function batchArrivals(kind, n) {
 | [D2] 최신 서버 상태 | `/health` 200, model_loaded=true, lazy; `/monitor/versions` 200, v2; `/logs/aiops.log` 200 | `MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow .venv/bin/python -m uvicorn serving_app.main:app --host 127.0.0.1 --port 8000` |
 
 ### 트러블슈팅
+
+- [D2] 최신 main의 CSV departures 전송 기능과 미병합 이력 기능이 섞이지 않도록 최신 main에서 디자인만 분리. 원래 작업 폴더는 그대로 보존했다.
 
 - 2026-10-01 | D2 | 브라우저 `ERR_CONNECTION_REFUSED` → 사용자 터미널에 서버 실행 명령이 아직 없었음 → `python -m uvicorn serving_app.main:app --port 8000` 실행 후 대시보드 표시 확인(사용자 캡처). 이후 실제 `/health` 200 확인.
 - 2026-10-01 | D2 | 기존 UI가 `anomaly`·`structure_drift`·`rolled_back`를 기본 정상 문구로 표시 → B가 추가한 상태 분기가 없었음 → 문구와 파이프라인 분기 추가 → 대체 응답으로 상태별 표시 확인.
@@ -541,6 +549,8 @@ function batchArrivals(kind, n) {
 
 ### 다른 영역에 요청
 
+- [D2 → D1/E] 사용자 요청에 따라 공통 CSS 포함 디자인 변경. 기존 함수와 상수는 유지하며 팀 통합 리뷰를 요청한다.
+
 - C: 최신 main에서 `registry_error`, `serving_registry_version`, `stale` 비교 구현 확인. D2 화면에서 조회 실패·등록 모델 없음·서빙 번호를 구분한다.
 - B (**완료**, `feat/e-batch-departures`): `BatchTestRequest`에 선택 항목 `departures` 추가. CSV 배치는 `departures`를 함께 전송한다.
 - A/C: 최신 main 공통 테스트 6개 중 2개 실패: `serving_run_id` 키 누락(`KeyError`)과 run_id 없는 경우 `stale=None` 기대/실제 False의 불일치. 최신 C는 등록 번호 비교 정책이다. 팀 API 계약과 테스트 정합성 확인 요청. D2 범위 밖 코드는 수정하지 않았다.
@@ -572,6 +582,9 @@ function batchArrivals(kind, n) {
 - 2026-10-01 | D2 | main 976b069의 D1 예측 카드와 PR #20 충돌 해결. init에서 D1 예측과 D2 모니터 조회를 모두 시작하며 두 담당자의 상태·측정·변경 기록 보존 | 기존 화면 점검 53개 통과, compileall 통과. `/tmp/d2-init-merge-check.cjs`로 D1 함수·기록 보존 및 예측 대기 중 D2 초기화/주기 조회 진행 확인 | feat/d2-monitor-main
 
 - 2026-10-01 | E (D2 영역 수정, 팀 공유 필요) | CSV 배치가 `Departures` 열을 `departures`로 함께 전송 (`parseBatchCsv()`가 `departures` 반환, `sendBatch(kind, csv)`). 랜덤워크 배치는 `arrivals`만. 안내 문구 수정 | `node --check` 통과, `parseBatchCsv()`를 node로 실행해 `jeju_demo_batch_normal_41rows.csv` 41행의 도착·출발 값이 CSV와 일치. 브라우저 화면 확인은 미실행 | feat/e-batch-departures
+
+
+- 2026-10-01 | D2 | 디자인 1/2: 블루·자주 테마와 반응형 간격 | JavaScript 원문·정적 DOM ID 보존, node/compileall 통과, 추가 학습 미측정 | feat/d2-dashboard-theme
 
 ## 5. 데이터·상수·통합 — 담당 E
 
