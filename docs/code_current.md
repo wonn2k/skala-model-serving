@@ -439,6 +439,8 @@ function batchArrivals(kind, n) {
 
 ### 아키텍처
 
+- [D2] 디자인 2/2: 공항 운영 서비스 명칭, 예측·모델 2열, 설명 접기 및 입력 구역 정리. 비교 그래프는 블루·자주 2px 선, 아웃글로우(blur 2.2/alpha 0.48), 밝은 시작→진한 끝의 가로 막대(높이 14).
+
 - [D2] 디자인 1/2: 블루·자주 CSS 토큰, 카드·입력·버튼·표의 간격 및 반응형 스타일. 화면 배치·그래프 표현은 후속 디자인 PR에서 적용한다.
 
 - **역할**: 운영 담당자가 보는 화면 하나. 위쪽은 "내일 도착 여객 예측 N명 · 등급"(D1), 아래쪽은 운영 체계가 돌아가는 것을 보여주는 배치 전송·재학습 로그·모델 버전(D2).
@@ -458,6 +460,8 @@ function batchArrivals(kind, n) {
 
 ### 현재 상태
 
+- [D2] 테마 PR 위에 화면 배치·그래프 표현을 적용. 중복 수치 제거, 서버 판정·날짜별 오차 접기, ±500 라벨 분리. 최신 main의 CSV 도착·출발 여객 동시 전송과 안내를 보존. 미병합 D2 이력/5색 기능은 포함하지 않으며 메뉴는 기존 로그로 이동한다.
+
 - [D2] 사용자 전체 UI 개편 요청에 따라 공통 CSS를 수정했다. 기존 JavaScript·API·데이터 처리·임계값은 변경하지 않았다. 후속 마크업을 위한 스타일을 포함한다.
 
 - [D1] 예측·혼잡 등급 카드: 구현 (`feat/d1-forecast-card`). 상태 4종(업로드 전 / 로딩 / 성공 / 실패)을 표시한다. 예측·실패가 다른 카드 초기화를 막지 않는다.
@@ -475,6 +479,8 @@ function batchArrivals(kind, n) {
 - [D2] (D1 작성) 두 배치 비교는 #14의 `sendBatch(kind, csvArrivals)`에 붙였다: 전송 시작 시 `batchTarget(kind)`로 칸·출처를 정하고, 성공하면 `lastBatchBySlot`에 보관 후 `renderCompare()`. 결과는 페이지 메모리에만 있다(새로고침하면 빈 칸). 버튼 비활성화·상태 배지·파이프라인 단계는 #14 구현을 그대로 쓴다.
 
 ### 측정값
+
+- [D2] 최신 공통 unittest 8개 통과(출발 여객 전송/길이 검사 포함). 배치 파싱·전송부터 init까지 및 차트 이전 함수들은 최신 main과 동일(SLOT_META 색상만 제외). 기존 정적 DOM ID 보존/중복 없음, node 문법 검사 통과. 기존 8000 서버 /health: status=ok, model_loaded=false, loading_mode=lazy. 추가 학습·품질 비교는 미측정.
 
 - [D2] 테마 PR: main 5f3c616 대비 JavaScript 원문 동일, 기존 DOM ID 보존 확인. node 문법 검사·compileall 통과. 디자인 단계의 추가 학습 및 품질 비교는 미측정.
 
@@ -504,6 +510,8 @@ function batchArrivals(kind, n) {
 | [D2] 최신 서버 상태 | `/health` 200, model_loaded=true, lazy; `/monitor/versions` 200, v2; `/logs/aiops.log` 200 | `MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow .venv/bin/python -m uvicorn serving_app.main:app --host 127.0.0.1 --port 8000` |
 
 ### 트러블슈팅
+
+- [D2] main과 디자인의 CSV 안내 문구 충돌 → main의 실제 출발 여객 전송 설명을 유지하면서 짧은 안내/접기 형식으로 표시. 기존 기능 PR과 겹치는 이력·5색 코드는 제외하고 디자인만 추출.
 
 - [D2] 최신 main의 CSV departures 전송 기능과 미병합 이력 기능이 섞이지 않도록 최신 main에서 디자인만 분리. 원래 작업 폴더는 그대로 보존했다.
 
@@ -585,6 +593,9 @@ function batchArrivals(kind, n) {
 
 
 - 2026-10-01 | D2 | 디자인 1/2: 블루·자주 테마와 반응형 간격 | JavaScript 원문·정적 DOM ID 보존, node/compileall 통과, 추가 학습 미측정 | feat/d2-dashboard-theme
+
+
+- 2026-10-01 | D2 | 디자인 2/2: 화면 배치·명칭·블루/자주 비교 그래프 | 최신 main의 비시각 함수 동일 및 DOM ID 보존·node 문법 검사 통과, 추가 학습 미측정 | feat/d2-dashboard-chart-style
 
 ## 5. 데이터·상수·통합 — 담당 E
 
