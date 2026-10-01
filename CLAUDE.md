@@ -47,6 +47,19 @@ python serving_app/train_and_register.py
 MODEL_SOURCE=mlflow uvicorn serving_app.main:app --port 8000
 ```
 
+## 작업자 코드 (사용자가 "나 B야"라고 하면 이 표로 해석한다)
+| 코드 | 역할 | 담당 파일 (여기만 고친다) | `docs/code_current.md` 섹션 | 브랜치 예 |
+|---|---|---|---|---|
+| A | 서빙 API | `serving_app/model_loader.py`, `routers/predict.py`의 `predict()`, `schemas.py`, `routers/health.py` | 1 | `feat/a-…` |
+| B | 모니터링·AIOps | `serving_app/monitoring/*`, `routers/predict.py`의 `batch_test()`, `scripts/simulate_drift.py` | 3 | `feat/b-…` |
+| C | 학습·배포·버전 조회 | `serving_app/train_and_register.py`, `routers/data.py`, `routers/monitor.py`(신설), `Dockerfile`, `docker-compose.yml` | 2 | `feat/c-…` |
+| D1 / D2 | 프론트엔드 (예측 카드 / 배치·버전·로그) | `serving_app/static/index.html` (D1 위쪽, D2 아래쪽 — 충돌 허용) | 4 | `feat/d1-…`, `feat/d2-…` |
+| E | 데이터·상수·통합·기획서 | `data/`, `scripts/prepare_jeju_data.py`, `CLAUDE.md` 상수 표, `docs/`, 0번 표 | 5 | `feat/e-…` |
+
+- 자기 담당 파일 밖을 고쳐야 하면 고치지 말고 `code_current.md` 자기 섹션 "다른 영역에 요청"에 적는다.
+- 각자 할 일의 현재 목록은 `docs/code_current.md` 0번 표(상태 "미구현"인 행)와 `docs/PROJECT_PLAN.md` 6번.
+- 실험 브랜치(`exp/*`)는 E가 돌린 검증용이다. `main`에 없는 동작(결항일 보간, bias 판정, 롤백, 3 epoch)은 팀 합의 후에만 가져온다.
+
 ## 작업 흐름
 - `main`에 직접 push 금지. `feat/…` 브랜치 → PR → 리뷰 1명 → Squash merge (`docs/CONTRIBUTING.md`).
 - PR 전: `python -m compileall -q data scripts serving_app`, 서버 기동, `/health` 확인.
