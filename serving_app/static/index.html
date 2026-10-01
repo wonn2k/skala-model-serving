@@ -1164,6 +1164,8 @@ async function sendBatch(kind, csvArrivals = null) {
     const check = data.drift_check || {};
     lastBatchBySlot[target.slot] = { arrivals, predictions: data.predictions || [], drift_check: check, ts: Date.now() / 1000, source: target.source, short: target.short };
     renderCompare();
+    // 승격·롤백으로 Production이 바뀌었으면 위 예측 카드도 새 모델로 다시 조회 (서버는 reset_cache 후 다음 /predict부터 새 모델)
+    if ((check.status === "retrain_triggered" && check.promoted === true) || check.status === "rolled_back") loadForecast();
     const labels = {
       ok: ["ok", "정상 (재학습 없음)"],
       anomaly: ["warn", "일부 날짜의 큰 오차 감지 · 재학습 없음"],

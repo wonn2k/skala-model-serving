@@ -436,6 +436,7 @@ function batchArrivals(kind, n) {
 ### 현재 상태
 
 - [D1] 예측·혼잡 등급 카드: 구현 (`feat/d1-forecast-card`). 상태 4종(업로드 전 / 로딩 / 성공 / 실패)을 표시한다. 예측·실패가 다른 카드 초기화를 막지 않는다.
+- [D1] 배치 전송 결과가 승격(`retrain_triggered` + `promoted: true`) 또는 `rolled_back`이면 예측 카드를 자동으로 다시 조회한다 (`sendBatch()` 성공 처리에 1줄). `ok`·`structure_drift`·게이트 실패는 모델이 그대로라 재조회하지 않는다.
 - [D1] 입력 출처: C의 `GET /data/status` `recent` 연결 완료 (main #6). 최신 업로드 파일의 마지막 20행으로 예측한다. 임시 상수(`FALLBACK_RECENT`)와 "임시 데이터" 배지는 제거했다. `recent`가 20행 배열이 아니면 "GET /data/status의 recent가 20행 배열이 아닙니다" 실패 상태를 띄운다.
 - [D1] "내일"은 실제 내일이 아니라 입력 마지막 날 다음날이다 (`data/jeju_airport_arrivals.csv` 업로드 기준 2025-10-31 → 2025-11-01). 카드에 기준일·예측일을 함께 표시한다.
 - [D1] `model_version`은 local이면 `v1-local`, mlflow면 항상 `production`이라 재학습해도 바뀌지 않는다. 버전 변화는 `model_registry_version`으로 보이므로 둘 다 표시한다.
@@ -529,6 +530,7 @@ function batchArrivals(kind, n) {
 - [D1] D2·B: 파이프라인 "드리프트 감지" 설명 `RMSE vs 임계치` 불일치 → `feat/d-dashboard-compare`에서 `bias vs ±500`으로 고침 (D2 영역 수정, PR에 명시). B는 판정 기준 표기만 확인 부탁.
 - [D2] (D1 작성) B: `check_and_trigger()`에 동시 실행 방지가 없다. `/predict/batch-test`가 겹치면 같은 데이터로 두 번 재학습·승격된다 (위 트러블슈팅 v6·v7). 화면은 #14로 막았지만 `scripts/simulate_drift.py`·curl은 겹칠 수 있다. 재학습 구간 잠금(예: `threading.Lock`, 재학습 중이면 건너뛰고 status로 알림) 검토 요청. `aiops.log`에는 두 감지 줄이 모두 남았다(로그 누락 없음).
 - [D2] (D1 작성) E: `index.html` 상단에 `BIAS_THRESHOLD = 500`(`drift_detector.py` 복제)을 추가했다. CLAUDE.md 상수 표의 "대시보드 상수 복제" 행에 반영 요청.
+- [D1] D2: 재학습 로그 카드의 조회 시간 초과(8초 `AbortSignal.timeout`)가 "Fetch is aborted" 같은 브라우저 원문으로 보인다 (`index.html` 로그 갱신 실패·로그 열기 실패 메시지가 `error.message`를 그대로 씀). 버전 카드처럼 `TimeoutError`면 "로그 조회 시간 초과 · 다시 시도하세요"로 바꾸는 것 검토 요청.
 
 ### 변경 기록
 
@@ -547,6 +549,7 @@ function batchArrivals(kind, n) {
 - 2026-10-01 16:11 | youjin09222/D1 | D1이 D2·E 영역 작업, 팀 공유 후 진행: 라이트 테마, 두 배치 나란히 비교(왼쪽/오른쪽 칸, CSV 칸 선택), 파이프라인 문구 `bias vs ±500`, `BIAS_THRESHOLD`. 버튼 비활성화·배지·파이프라인 단계는 #14 구현 사용 | 비교 수치 35개 일치(실제 서버, Python 독립 계산), 칸 배정 CSV 2건·랜덤 1건 확인(v11~v13), `node --check` 통과, 외부 리소스 없음 | feat/d-dashboard-compare
 - 2026-10-01 16:40 | youjin09222/D1 | 비교 칸 출처 줄에서 "출처:" 접두어 제거, 전송 시각을 시:분으로 표시 | `node --check` 통과, 저장된 응답으로 렌더링: "왼쪽 (기준) · 오후 4:26 전송 · 랜덤 정상", "오른쪽 (비교) · 오후 4:26 전송 · 랜덤 드리프트" | feat/d-dashboard-compare / #23
 - 2026-10-01 16:50 | youjin09222/D1 | 비교 영역에서 방향 표기 제거(칸 제목 = 출처, 빈 칸은 안내만, 요약 행 이름 = 출처, CSV 선택만 "왼쪽 칸/오른쪽 칸"). 버그 수정: 칸 키를 left/right로 바꾼 뒤에도 요약이 `stats.normal`/`stats.drift`를 확인해 요약 막대가 그려지지 않던 문제 | `node --check` 통과, 저장된 실제 응답으로 렌더링: 제목 "랜덤 정상 오후 4:26 전송", 요약 SVG 2개, RMSE 막대 폭 45.3/181.3px = 독립 계산, 헤드리스 Chrome 화면 확인 | feat/d-dashboard-compare / #23
+- 2026-10-01 17:05 | youjin09222/D1 | 통합 점검 제안 반영: 승격·롤백 뒤 예측 카드 자동 재조회. D2에 로그 조회 시간 초과 문구 요청 | 모의 응답 5종으로 `sendBatch()` 실행: 승격·`rolled_back`만 `/data/status` → `/predict` 재조회, `ok`·게이트 실패·`structure_drift`는 재조회 없음. `node --check` 통과 | feat/d-dashboard-compare / #23
 
 - 2026-10-01 | D2 | main 976b069의 D1 예측 카드와 PR #20 충돌 해결. init에서 D1 예측과 D2 모니터 조회를 모두 시작하며 두 담당자의 상태·측정·변경 기록 보존 | 기존 화면 점검 53개 통과, compileall 통과. `/tmp/d2-init-merge-check.cjs`로 D1 함수·기록 보존 및 예측 대기 중 D2 초기화/주기 조회 진행 확인 | feat/d2-monitor-main
 
