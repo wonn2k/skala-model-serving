@@ -150,8 +150,16 @@ def versions():
     )
     serving_run_id = getattr(cached, "run_id", None) if cached is not None else None
 
-    # stale 판정. run_id가 양쪽에 다 있으면 그걸로, 없으면 번호로 비교한다.
-    # 번호는 문자열로 올 수 있어 str로 맞춰 비교한다.
+    # stale 판정. run_id가 양쪽에 다 있으면 그걸로 끝난다.
+    #
+    # run_id가 없을 때는 번호로 비교하는데, 한쪽으로만 결론을 낸다.
+    #   번호가 다르다  -> 분명히 다른 모델이다. true로 단정해도 된다.
+    #   번호가 같다    -> 같다고 단정할 수 없다. 같은 번호가 다른 run을 가리키게
+    #                     다시 등록됐을 수 있다. 확인할 방법이 없으므로 null로 둔다.
+    #
+    # 전에는 번호가 같으면 false를 돌려줬는데 그건 "확인했고 문제 없다"는 뜻이라
+    # 근거 없는 안심을 준다. 이 엔드포인트는 조용히 어긋난 걸 잡으려고 만든 것이라
+    # 모르는 걸 모른다고 하는 쪽이 맞다 (A의 tests/test_serving_identity.py 기준).
     stale = None
     stale_basis = None
     if production is not None:
@@ -159,8 +167,9 @@ def versions():
             stale = serving_run_id != production["run_id"]
             stale_basis = "run_id"
         elif serving_registry_version is not None:
-            stale = str(serving_registry_version) != str(production["version"])
-            stale_basis = "registry_version"
+            if str(serving_registry_version) != str(production["version"]):
+                stale = True
+                stale_basis = "registry_version"
 
     return {
         "model_name": MODEL_NAME,
