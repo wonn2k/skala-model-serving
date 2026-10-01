@@ -12,9 +12,23 @@ Day2~3: 지금 무엇이 서비스되고 있는지 보여주는 조회 전용 �
     나란히 돌려준다.
 
     처음에는 둘이 어긋났는지 판정할 수 없었다. LoadedModel이 version 문자열("production")만
-    들고 있어서 몇 번 버전인지 몰랐기 때문이다. A가 LoadedModel.registry_version을 추가해
-    줘서(PR #5) 이제 레지스트리의 Production 번호와 직접 비교해 stale을 판정한다.
-    이것이 수업 가이드 부록1의 6번(승격했는데 서버는 옛 모델로 응답) 재현 지점이다.
+    들고 있어서 몇 번 버전인지 몰랐기 때문이다. A가 registry_version(PR #5)과 run_id(PR #9)를
+    추가해 줘서 이제 실제로 판정한다.
+
+    stale이 true가 되는 경우와 안 되는 경우
+        이 서버 자신이 재학습해서 승격한 경우에는 true가 뜨지 않는다. retrain_trigger가
+        승격·롤백 직후 model_loader.reset_cache()를 부르기 때문에 캐시가 비고, 다음 예측이
+        새 버전을 읽는다(그 사이에는 비교 대상이 없어 null이다). 즉 자동 재학습 흐름은
+        이미 어긋남을 스스로 막는다.
+        true가 뜨는 것은 승격이 이 서버 밖에서 일어났을 때다. MLflow UI에서 손으로 승격했거나,
+        별도 배치·다른 인스턴스가 승격했거나, 여러 서버를 띄워 둔 경우다. 실제 운영에서
+        캐시가 썩는 건 이쪽이고, 이 엔드포인트가 필요한 이유도 이쪽이다.
+        실측: 컨테이너 안에서 train_and_register.py를 따로 실행해 v2를 승격시키자
+        production v2 / serving v1 / stale true가 떴고, 재기동 후 false로 돌아왔다.
+
+    판정은 run_id를 먼저 본다. 번호보다 좁은 식별자라서, 같은 번호가 다른 run을 가리키게
+    다시 등록된 경우까지 잡는다. run_id가 없으면(로더가 아직 안 채웠거나 옛 버전) 번호로
+    비교한다. 양쪽 중 하나라도 없으면 null로 둬서 "어긋났다"와 "모른다"를 구분한다.
 
 조회 실패를 숨기지 않는다
     처음엔 실패를 모두 production: null로 뭉갰는데, 그러면 네 가지 상황이 똑같이 보인다.
@@ -123,21 +137,30 @@ def versions():
             "registry_error": None,
             "serving_version": serving_version,
             "serving_registry_version": None,
+            "serving_run_id": None,
             "stale": False,  # 로컬 모델은 레지스트리와 비교할 대상이 없다
+            "stale_basis": None,
         }
 
     production, registry_error = _registry_production()
 
-    # 서버가 들고 있는 모델의 레지스트리 번호. lazy 모드에서 첫 요청 전이면 None이다.
+    # 서버가 들고 있는 모델의 신원. lazy 모드에서 첫 요청 전이면 둘 다 None이다.
     serving_registry_version = (
         getattr(cached, "registry_version", None) if cached is not None else None
     )
+    serving_run_id = getattr(cached, "run_id", None) if cached is not None else None
 
-    # stale 판정. 비교할 양쪽이 다 있을 때만 True/False를 내고, 하나라도 없으면 null로 둬서
-    # "어긋났다"와 "모른다"를 구분한다. 번호는 문자열로 올 수 있어 str로 맞춰 비교한다.
+    # stale 판정. run_id가 양쪽에 다 있으면 그걸로, 없으면 번호로 비교한다.
+    # 번호는 문자열로 올 수 있어 str로 맞춰 비교한다.
     stale = None
-    if production is not None and serving_registry_version is not None:
-        stale = str(serving_registry_version) != str(production["version"])
+    stale_basis = None
+    if production is not None:
+        if serving_run_id is not None and production["run_id"] is not None:
+            stale = serving_run_id != production["run_id"]
+            stale_basis = "run_id"
+        elif serving_registry_version is not None:
+            stale = str(serving_registry_version) != str(production["version"])
+            stale_basis = "registry_version"
 
     return {
         "model_name": MODEL_NAME,
@@ -148,5 +171,8 @@ def versions():
         "registry_error": registry_error,
         "serving_version": serving_version,
         "serving_registry_version": serving_registry_version,
+        "serving_run_id": serving_run_id,
         "stale": stale,
+        # 무엇을 근거로 판정했는지. null이면 판정하지 않았다는 뜻이다.
+        "stale_basis": stale_basis,
     }
