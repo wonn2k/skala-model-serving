@@ -48,23 +48,23 @@
 
 ### 대상 파일
 
-`serving_app/main.py`, `serving_app/model_loader.py`, `serving_app/routers/predict.py`의 `predict()`, `serving_app/routers/health.py`, `serving_app/schemas.py`
-(`predict.py`의 `batch_test()`와 `schemas.py`의 `BatchTest*`는 B 영역. 같은 파일이므로 PR을 작게 나누고 먼저 머지된 쪽에 rebase한다.)
+`serving_app/model_loader.py`, `serving_app/routers/predict.py`의 `predict()`, `serving_app/routers/health.py`, `serving_app/schemas.py`
+(`predict.py`의 `batch_test()`와 `schemas.py`의 `BatchTest*`는 B 영역. 이번 변경은 이 영역을 수정하지 않는다. `main.py` 라우터 등록은 C와 별도 조율한다.)
 
 ### 아키텍처
 
 - **역할**: 최근 20일 시퀀스를 받아 다음 날 도착 여객 수 하나를 돌려주는 HTTP 서버. 모델을 어디서(로컬 파일 / MLflow Production) 언제(기동 시 / 첫 요청 시) 불러올지 정한다.
 - **구성 요소**
   - `main.py`: `FastAPI` 앱 생성, 라우터 4개 등록(`predict`, `health`, `data`, `logs`), `aiops` 로거를 `logs/aiops.log`에 연결, `static/`을 `/`에 마운트, `startup`에서 `LOADING_MODE=eager`면 `model_loader.load_eager()`.
-  - `model_loader.py`: `get_model()` → `_model_cache`가 비어 있으면 `_load_model()` → `MODEL_SOURCE`에 따라 `_load_from_local()`(`serving_app/models/airport_v1.keras` + `scaler.pkl`, 버전 `v1-local`) 또는 `_load_from_mlflow()`(`models:/Airport_Arrivals_Predictor/Production`, **TODO 1**). 반환은 `LoadedModel(predict_one, version)`.
-  - `routers/predict.py` `predict()`: `PredictRequest.sequence` 20개 → `model.predict_one()` → `PredictResponse(predicted_arrivals, model_version)`.
+  - `model_loader.py`: `get_model()` → `_model_cache`가 비어 있으면 `_load_model()` → `MODEL_SOURCE`에 따라 `_load_from_local()`(`serving_app/models/airport_v1.keras` + `scaler.pkl`, 버전 `v1-local`) 또는 `_load_from_mlflow()`(Production을 조회한 뒤 `models:/Airport_Arrivals_Predictor/<실제 버전>`으로 고정해서 로드, **TODO 1 구현**). 반환은 `LoadedModel(predict_one, version, registry_version)`. 스케일러는 기존 로컬 `scaler.pkl`을 그대로 사용하며 재학습하지 않는다.
+  - `routers/predict.py` `predict()`: `PredictRequest.sequence` 20개 → `model.predict_one()` → `PredictResponse(predicted_arrivals, model_version, model_registry_version)`. 기존 `model_version="production"`을 유지하고 실제 등록 번호를 별도 필드로 반환한다. 로컬 모델의 등록 번호는 `null`.
   - `routers/health.py`: `GET /health` → 상태, 로딩 모드, 모델 로드 여부.
   - `schemas.py`: `PredictRequest`(길이 20, `arrivals`·`departures` 0 이상 정수), 위반 시 422.
 - **흐름**: 대시보드 또는 클라이언트 → `POST /predict` → Pydantic 검증 → `get_model()`(캐시) → 스케일 → LSTM → 역스케일 → JSON 응답.
 - **다른 영역과의 연결**
   - C가 만드는 `GET /data/status`의 `recent`가 이 API의 입력이 된다 (D1이 호출).
-  - B의 재학습이 새 Production을 승격해도 `_model_cache`는 그대로다. 승격 시 캐시를 비우는 함수(예: `model_loader.reset_cache()`)를 A가 제공하고 B가 호출한다.
-  - `model_version` 값은 D2가 대시보드에 표시한다.
+  - A가 제공한 `model_loader.reset_cache()`를 B가 승격·롤백 성공 후 호출하면 다음 예측에서 모델을 다시 로드한다. 호출부는 B 영역이며 이번 PR에서는 수정하지 않는다. 캐시 잠금으로 첫 로딩과 초기화의 경합을 막는다.
+  - D2는 소스 구분에 `model_version`, 실제 서빙 버전 번호 표시에 `model_registry_version`을 사용할 수 있다. 현재 레지스트리 Production과 메모리에 로드된 버전은 다를 수 있다.
 - **설정**: `LOADING_MODE=lazy|eager`(기본 lazy), `MODEL_SOURCE=local|mlflow`(기본 local), `MLFLOW_MODEL_URI`.
 - **실행**: `uvicorn serving_app.main:app --host 0.0.0.0 --port 8000` / MLflow 모델: `MODEL_SOURCE=mlflow uvicorn ...`
 
@@ -72,39 +72,66 @@
 
 - `GET /health`, `POST /predict`는 스켈레톤 그대로 완성되어 있다.
 - `/predict` 입력은 최근 20일 시퀀스(`arrivals`, `departures`)이며 길이가 20이 아니거나 값이 음수이면 422로 거부한다.
-- `model_loader._load_from_mlflow()`는 TODO 1 상태다. `MODEL_SOURCE=mlflow`로 모델을 불러오면 `NotImplementedError`가 난다.
-- 재배포 후 서빙 모델 반영: `_model_cache`가 자동으로 갱신되지 않는다 (미해결, 수업 가이드 부록 1의 6번).
+- TODO 1 구현 완료. Production 조회 결과와 같은 버전 URI로 가중치를 읽고 응답 번호를 기록한다. Production이 없거나 로딩이 실패하면 로컬 모델로 조용히 대체하지 않는다.
+- Lazy/Eager 및 캐시 초기화 함수 구현·검증 완료. B 호출 연결 전에는 승격만으로 캐시가 바뀌지 않는다.
+- `reset_cache()`는 호출한 프로세스에만 적용된다. 이미 모델을 받은 요청은 기존 모델로 마치며, 다중 worker 간 동기화는 구현 범위 밖이다.
+- 교수 실습가이드 v3의 Day2 `model_version: production`, Day1 고정 스케일러, Lazy/Eager 방식 유지. 모델 구조·피처·학습·게이트·드리프트 정책은 변경하지 않았다.
 
 ### 측정값
 
 | 항목 | 값 | 조건 (PC, 명령) |
 |---|---|---|
-| `/predict` 첫 요청 응답 시간 (lazy) | 미측정 | |
-| `/predict` 두 번째 요청 응답 시간 | 미측정 | |
-| 서버 시작 시간 lazy / eager | 미측정 | |
-| `/predict` 응답 예시 (로컬 모델) | 미측정 | |
-| `/predict` 응답 예시 (MLflow 모델, `model_version`) | 미측정 | |
+| local/lazy 시작 / 첫 요청 / 두 번째 요청 (초) | 0.2241142499842681 / 2.0358974580012728 / 0.01348475000122562 | macOS arm64, Python 3.12.13, TensorFlow 2.21.0, 포트 8000, 1회 측정 |
+| local/lazy `/predict` | `{"predicted_arrivals": 42087.61, "model_version": "v1-local", "model_registry_version": null}` | 원자료 마지막 20행, HTTP 200 |
+| mlflow/lazy 시작 / 첫 요청 / 두 번째 요청 (초) | 0.19868695898912847 / 3.511652999994112 / 0.016238417010754347 | macOS arm64, Python 3.12.13, TensorFlow 2.21.0, 포트 8000, 1회 측정 |
+| mlflow/lazy `/predict` | `{"predicted_arrivals": 39772.69, "model_version": "production", "model_registry_version": "1"}` | 원자료 마지막 20행, HTTP 200 |
+| mlflow/eager 시작 / 첫 요청 / 두 번째 요청 (초) | 2.153921208024258 / 0.09605337501852773 / 0.014345583011163399 | macOS arm64, Python 3.12.13, TensorFlow 2.21.0, 포트 8000, 1회 측정 |
+| mlflow/eager `/predict` | `{"predicted_arrivals": 39772.69, "model_version": "production", "model_registry_version": "1"}` | 원자료 마지막 20행, HTTP 200 |
+| 입력 오류 | 19행·21행·음수·departures 누락 모두 422 (4모드 × 4종) | local/lazy, mlflow/lazy, mlflow/eager, 별도 registry 모드 |
+| 캐시 전환 | 승격 직후 번호 1 → reset 후 2 → 롤백+reset 후 1 | 복제 SQLite DB, 같은 v1 artifact로 v2 등록. 실제 재학습/성능 개선 검증 아님 |
+| 캐시·로더 테스트 | 8개 통과 | 버전 2/11 숫자 비교, 고정 scaler, Production 없음, 실패 후 재시도, 동시 첫 요청 1회 로드, 로딩 중 reset, eager 캐시, 반복 reset |
+| `/health` | lazy 초기 false → 예측 후 true, eager 초기 true | 모두 `status: ok` |
 
 ### 트러블슈팅
 
-(아직 없음)
+- 이전: MLflow 로드는 `NotImplementedError`. 원인: TODO 1 미구현. 해결: Production 조회·정확한 버전 로드·고정 scaler 결합. 이후 실제 `/predict` 200, `model_version=production`, `model_registry_version=1`.
+- Production 상태 이름만 출력하면 버전 전환을 구분할 수 없으므로 기존 필드는 보존하고 등록 번호 필드를 추가했다.
+- 테스트 중 MLflow stage API의 폐기 예정 경고가 출력됨. 수업의 Production stage 방식을 유지했다. 별칭 전환은 이번 범위 밖이며 기능 오류는 아니었다.
+- 이번 테스트의 시작 시간은 프로세스 내부 import 시작부터 Uvicorn startup 완료까지다. OS 프로세스 생성 시간은 포함하지 않으며 환경·캐시 영향을 받는 1회 값이다.
 
 ### 증빙
 
-| 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
+| 증빙 | 무엇을 보여주나 | 상태 | 파일 | 기록자 |
 |---|---|---|---|---|
-| `/predict` 응답 (로컬 모델) | `model_version`이 `v1-local` | 미촬영 | | |
-| `/predict` 응답 (MLflow 모델) | `model_version`이 `production`으로 전환 | 미촬영 | | |
-| `/predict` 422 응답 | 시퀀스 19개, 음수 값 입력이 거부됨 | 미촬영 | | |
-| `/health` 응답 | 로딩 모드와 모델 로드 여부 | 미촬영 | | |
+| HTTP local/lazy/eager | 예측 결과·시간·health·422 | 실제 실행 로그 확보, UI 캡처 미촬영 | `logs/a-http-local.json`, `logs/a-http-lazy.json`, `logs/a-http-eager.json` | 윤동현/A |
+| 버전 전환·롤백 후 reset | 같은 프로세스에서 등록 번호 1→2→1 | 실제 HTTP 확인, 재학습 호출 없음 | `logs/a-http-cache.json` | 윤동현/A |
+| 캐시·로더 테스트 | 경합·실패·재시도 등 8개 | 통과 | `logs/a-unit-results.log` | 윤동현/A |
+
+로그와 검증 스크립트(`logs/verify_a_unit.py`, `logs/verify_a_http.py`)는 이 PC의 Git 제외 경로에 보관한다. 위 측정표와 PR 본문에 결과를 함께 기록하며, UI 스크린샷으로 간주하지 않는다.
 
 ### 다른 영역에 요청
 
+- B: 승격·롤백 **성공 후** `model_loader.reset_cache()` 호출 연결 필요. 판정 창 초기화·재학습 정책은 B가 결정/구현한다.
+- C/D/E: 단일 예측 응답에 `model_registry_version: str | null`을 추가했다. 기존 필드는 유지한다. C의 버전 조회와 D의 표시, E의 API 명세에 반영 요청.
 - C: `GET /data/status`에 `recent`(최근 20일, 오래된 순, `{date, arrivals, departures}`)를 넣어 주면 `/predict` 입력을 그대로 만들 수 있다.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | 스켈레톤을 공항 도메인으로 치환한 상태를 기록 | 해당 없음 | main
+
+- 2026-10-01T14:27:20+09:00 | 윤동현/A | 실습 2-1 MLflow 로더, 실제 등록 번호, 캐시 초기화 구현 | `uv run python logs/verify_a_unit.py` 8개 통과; `uv run python logs/verify_a_http.py local/lazy/eager/cache` (모드별 별도 실행)로 위 HTTP 결과 확인 | feat/a-mlflow-serving
+
+검증 실행 명령 (프로젝트 루트, 8000 포트에서 순차 실행):
+```bash
+uv run python -m compileall -q data scripts serving_app
+uv run python logs/verify_a_unit.py
+uv run python logs/verify_a_http.py local
+uv run python logs/verify_a_http.py lazy
+uv run python logs/verify_a_http.py eager
+uv run python logs/verify_a_http.py cache
+# 일반 실행 (레지스트리는 이 프로젝트 DB):
+MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn serving_app.main:app --host 127.0.0.1 --port 8000
+```
 
 ---
 

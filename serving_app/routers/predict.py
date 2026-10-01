@@ -27,7 +27,11 @@ def predict(req: PredictRequest):
     model = model_loader.get_model()
     sequence = [p.model_dump() for p in req.sequence]
     predicted_arrivals = model.predict_one(sequence)
-    return PredictResponse(predicted_arrivals=round(predicted_arrivals, 2), model_version=model.version)
+    return PredictResponse(
+        predicted_arrivals=round(predicted_arrivals, 2),
+        model_version=model.version,
+        model_registry_version=model.registry_version,
+    )
 
 
 @router.post("/predict/batch-test", response_model=BatchTestResponse)

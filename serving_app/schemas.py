@@ -29,6 +29,9 @@ class PredictRequest(BaseModel):
 class PredictResponse(BaseModel):
     predicted_arrivals: float
     model_version: str
+    model_registry_version: str | None = Field(
+        None, description="실제로 예측에 사용한 MLflow 등록 버전 번호. 로컬 모델이면 null"
+    )
 
 
 class BatchTestRequest(BaseModel):
