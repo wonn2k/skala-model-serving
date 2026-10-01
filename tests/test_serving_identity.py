@@ -105,12 +105,24 @@ class BatchWindowTests(unittest.TestCase):
     def tearDown(self):
         predict.recent_predictions[:] = self.original
 
-    def send(self, count):
-        model = SimpleNamespace(predict_one=lambda sequence: 37000.)
+    def send(self, count, departures=None):
+        self.sequences = []
+        model = SimpleNamespace(predict_one=lambda sequence: self.sequences.append(sequence) or 37000.)
         with patch.object(loader, "get_model", return_value=model), \
                 patch.object(predict, "check_and_trigger", return_value={}) as check:
-            response = predict.batch_test(BatchTestRequest(arrivals=[37000.] * count))
+            response = predict.batch_test(BatchTestRequest(arrivals=[37000.] * count, departures=departures))
             return response, list(check.call_args.args[0])
+
+    def test_departures_follow_each_window_and_default_to_fixed_value(self):
+        self.send(22, departures=[float(day) for day in range(22)])
+        self.assertEqual([[p["departures"] for p in s] for s in self.sequences],
+                         [list(range(20)), list(range(1, 21))])
+        self.send(21)
+        self.assertEqual({p["departures"] for p in self.sequences[0]}, {predict.SIMULATED_DEPARTURES})
+
+    def test_departures_length_must_match_arrivals(self):
+        with self.assertRaises(ValueError):
+            BatchTestRequest(arrivals=[37000.] * 41, departures=[37000.] * 40)
 
     def test_41_rows_replace_all_previous_predictions(self):
         response, window = self.send(41)

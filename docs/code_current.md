@@ -59,7 +59,7 @@
   - `model_loader.py`: `get_model()` → `_model_cache`가 비어 있으면 `_load_model()` → `MODEL_SOURCE`에 따라 `_load_from_local()`(`serving_app/models/airport_v1.keras` + `scaler.pkl`, 버전 `v1-local`) 또는 `_load_from_mlflow()`(Production을 조회한 뒤 `models:/Airport_Arrivals_Predictor/<실제 버전>`으로 고정해서 로드, **TODO 1 구현**). 반환은 `LoadedModel(predict_one, version, registry_version, run_id)`. 스케일러는 기존 로컬 `scaler.pkl`을 그대로 사용하며 재학습하지 않는다.
   - `routers/predict.py` `predict()`: `PredictRequest.sequence` 20개 → `model.predict_one()` → `PredictResponse(predicted_arrivals, model_version, model_registry_version)`. 기존 `model_version="production"`을 유지하고 실제 등록 번호를 별도 필드로 반환한다. 로컬 모델의 등록 번호는 `null`.
   - `routers/health.py`: `GET /health` → 상태, 로딩 모드, 모델 로드 여부.
-  - `schemas.py`: `PredictRequest`(길이 20, `arrivals`·`departures` 0 이상 정수), 위반 시 422.
+  - `schemas.py`: `PredictRequest`(길이 20, `arrivals`·`departures` 0 이상 정수), 위반 시 422. `BatchTestRequest`(`arrivals` 21개 이상, 선택 `departures` — 있으면 `arrivals`와 같은 길이, 다르면 422).
 - **흐름**: 대시보드 또는 클라이언트 → `POST /predict` → Pydantic 검증 → `get_model()`(캐시) → 스케일 → LSTM → 역스케일 → JSON 응답.
 - **다른 영역과의 연결**
   - C의 `GET /data/status`의 `recent`가 이 API의 입력이 된다 (D1이 호출).
@@ -317,7 +317,7 @@ function batchArrivals(kind, n) {
 
 - **역할**: 예측·실제 쌍을 쌓아 오차를 감시하고, 임계값을 넘으면 알림 → 최근 데이터로 fine-tuning → 게이트 재검증 → 재배포까지 사람 없이 잇는다.
 - **구성 요소**
-  - `routers/predict.py` `batch_test()` (**TODO 3**): `BatchTestRequest.arrivals` 41개 → 길이 20 슬라이딩 윈도우 21개 → 각 윈도우로 예측(출발 여객은 `SIMULATED_DEPARTURES` 고정) → `recent_predictions`에 `{"predicted", "actual"}` 누적(최근 21건 유지) → `check_and_trigger()` → `BatchTestResponse(predictions, drift_check)`.
+  - `routers/predict.py` `batch_test()` (**TODO 3**): `BatchTestRequest.arrivals` 41개 → 길이 20 슬라이딩 윈도우 21개 → 각 윈도우로 예측(출발 여객은 요청에 `departures`가 있으면 같은 날짜의 실제값, 없으면 `SIMULATED_DEPARTURES` 고정) → `recent_predictions`에 `{"predicted", "actual"}` 누적(최근 21건 유지) → `check_and_trigger()` → `BatchTestResponse(predictions, drift_check)`.
   - `drift_detector.py`: `compute_rmse()` (**TODO 2**), `compute_bias()` (평균 오차 = 실제 − 예측), `assess(window)` → `{rmse, bias, anomalies, rmse_excl_anomalies, bias_excl_anomalies, drift}`. **세 종류 판정**: 하루 오차 > `ANOMALY_THRESHOLD`(10,000)인 날은 이상치로 빼고, 나머지의 |bias| > `BIAS_THRESHOLD`(500)이면 **수준 드리프트**(재학습). bias 작은데 RMSE > `RMSE_THRESHOLD`(2,700)이면 **구조 드리프트**(알림만). RMSE ≥ |bias|가 항상 성립해 드리프트 조건에 RMSE 항은 없다. `is_drift()`는 `assess()["drift"]`.
   - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): `assess()` → 이상치 있으면 `[WARN] anomaly` → 드리프트 아니면 `ok` / `anomaly` / `structure_drift`(오차 크지만 치우침 없음, 재학습 안 함) 반환 → 드리프트면 `[WARN] drift` → 이전 Production 버전 기억 → `latest_upload()` 최근 41행 → `fine_tune()` → 승격 시 `reset_cache()` + 판정 윈도우 `clear()` + `[OK]`. 게이트 실패는 그냥 실패 (재시도 간격 없음, 다음 배치에서 다시 판정). **롤백**: 승격 뒤 첫 판정이 드리프트이고 그 재학습이 게이트에 실패하면 `[ROLLBACK]` — 새 버전 Archived, 이전 버전 Production, `reset_cache()`. 승격 뒤 드리프트 아닌 윈도우가 한 번 나오면 승격 확정(롤백 대상에서 제외). 승격 기록은 프로세스 메모리(`_last_promotion`)에만 있다.
   - `scripts/simulate_drift.py` `send_batch()` (**TODO 5**): 랜덤워크 41일(정상 σ 1.2% / 드리프트 σ 3.6%)을 `/predict/batch-test`로 전송.
@@ -327,7 +327,7 @@ function batchArrivals(kind, n) {
   - A: `model_loader.get_model()`로 예측, 승격·롤백 뒤 `model_loader.reset_cache()` 호출.
   - C: `fine_tune(rows)`의 반환 `{"promoted", "rmse", "version"}`에 의존. `latest_upload()`로 재학습 데이터를 얻는다. 롤백은 `MlflowClient.transition_model_version_stage`로 Registry 스테이지를 직접 바꾼다.
   - D2: 배치를 보내는 쪽. `drift_check.status`가 `ok | anomaly | structure_drift | retrain_triggered | rolled_back` 다섯 가지로 늘었다.
-- **설정**: `RMSE_THRESHOLD = 2700.0`, `BIAS_THRESHOLD = 500.0`, `ANOMALY_THRESHOLD = 10000.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`, 시뮬레이션 σ 1.2% / 3.6%.
+- **설정**: `RMSE_THRESHOLD = 2700.0`, `BIAS_THRESHOLD = 500.0`, `ANOMALY_THRESHOLD = 10000.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`(`departures` 생략 시에만 사용), 시뮬레이션 σ 1.2% / 3.6%.
 - **실행**: `python scripts/simulate_drift.py` (서버 기동 후) / 실데이터 배치: `data/jeju_drift_batch_41rows.csv`의 `arrivals` 41개를 `POST /predict/batch-test`
 
 ### 현재 상태
@@ -338,7 +338,8 @@ function batchArrivals(kind, n) {
 - **확정값 (2026-10-01, `exp/clean-cancellation`)**: 수준 드리프트 |bias| > **500**, 게이트 **2,700**, 이상치 10,000, fine-tune **3 epoch**. 재시도 간격은 두지 않는다(실패는 그냥 실패). 근거는 아래 실험 6. 이전 확정값 1,500(실험 5)은 결항일 포함 학습 데이터 기준이었다 — 학습 데이터를 보간본으로 바꾸자(5번) 21일 bias가 ±1,000 안에서 움직여 1,500으론 2025년에 3월 한 번만 걸리고, 2,000 이상은 한 번도 안 걸린다. 500은 윈도우가 찰 때마다 작은 수준 변화도 따라가 사실상 "승격 뒤 3주마다 재학습 + 게이트 실패일엔 매일 재시도"가 된다.
 - RMSE만으로 판정하면 안 되는 이유(실험 6): 보간 모델도 21일 RMSE > 2,700인 날이 107일(2~5월, 9~10월)이고, RMSE 트리거 10회 중 7회는 bias ±800 안쪽(수준은 그대로, 흔들림만 큼). 재학습 3배에 RMSE 개선 0 (3,039 vs 재학습 없음 3,038).
 - 구조 드리프트의 실체: 기간별로 주간 리듬 ac(7)이 0.17(2024 H1) → 0.67(2025 Q3), 요일 진폭이 1,756 → 5,320으로 커졌다. 수준은 같은데 변동 폭이 바뀐 것이라 bias로 안 잡히고, 41행 fine-tuning으로도 안 줄어든다 (실험 2: 3,142 → 3,238). 9~10월 배치가 이 경우다.
-- 남은 이슈: 출발 여객 고정값이 250~950명의 오차를 더한다 (`departures` 전달 여부 미결). `_last_promotion`이 메모리에만 있어 서버 재시작 후 롤백 불가. `simulate_drift.py` 랜덤워크 σ(1.2%/3.6%)는 실변동성(7.3~8.4%)보다 낮아 미측정.
+- `batch-test`의 `departures`: 선택 항목으로 받는다 (`feat/e-batch-departures`). 대시보드 CSV 배치는 실제 출발 여객을 함께 보내고, 랜덤워크 배치와 `simulate_drift.py`는 생략해 37,000 고정을 유지한다. **이 섹션과 `data/README.md` 시연 순서의 기존 수치는 모두 고정값 조건에서 잰 것이라, CSV 배치로 시연하면 달라진다 — 서버 경유 재측정 전(미측정).** 아래 측정값 "출발 여객 고정 vs 실제" 표 참고.
+- 남은 이슈: `_last_promotion`이 메모리에만 있어 서버 재시작 후 롤백 불가. `simulate_drift.py` 랜덤워크 σ(1.2%/3.6%)는 실변동성(7.3~8.4%)보다 낮아 미측정.
 - 폭설 배치를 넣으면 이상치 3일을 뺀 나머지도 드리프트(2025-01~02 수요 하락 실제)라 재학습이 돈다. 이때 재학습 데이터는 "최신 업로드의 마지막 41행"이라 배치와 무관한 기간일 수 있다 — 시연 순서에서 업로드 순서를 지켜야 한다.
 
 ### 측정값
@@ -379,6 +380,25 @@ function batchArrivals(kind, n) {
 | 시연 순서(≤2025-08-31 학습) | v1 게이트 2,094 · 정상 07-22~08-31 2,183 / −117 `ok` · 9~10월 배치 09-01~10-11 3,490 / **−587** → 재학습 2,098 → v2 · 폭설 이상치 1일 제외 2,981 / +214 `structure_drift` | `data/README.md` "시연 순서". 보간 전엔 9~10월 배치가 오탐 사례였음 |
 | **실험 6** 보간 모델 트리거 시뮬레이션 (2025-01-01~10-31 하루씩 전진, raw 입력, 출발 37,000, 실제 fine-tune·게이트·롤백, 결항 포함 RMSE) | 재학습 없음 3,038 · bias>1,500 / ep10 3,058 (재학습 3, 승격 2) · bias>2,000·2,500·3,000 = 재학습 0 · RMSE>2,700 3,039 (10, 6) · RMSE>3,000 3,069 (6, 6) · bias>290 ep3 3,010 (16, 12) / ep10 3,031 (21, 13) / ep30 3,092 (30, 12) · bias>400 ep3 3,011 (13, 11) · **bias>500 ep3 3,017 (10, 9, 롤백 1)** | 스크래치 `sim_clean.py`, `sim_rmse.py`, `sim_290.py`, `sim_500.py`. v1 고정 21일 bias 최대 −1,989(3월). 어느 설정도 9~10월 구조 드리프트는 못 줄여 전체 RMSE 3,000대 유지. 그래프: 아티팩트 "보간 모델 임계값 시뮬레이션", "bias 290 epoch 비교" |
 
+출발 여객 고정 vs 실제 (2026-10-01, 브랜치 `feat/e-batch-departures`, Mac 1대, 1회). `TestClient`로 실제 `/predict/batch-test` 라우트를 왕복, **로컬 baseline 모델 `airport_v1.keras`**(Production 모델 아님), 재학습은 돌리지 않고 `assess()` 판정만. 값은 이상치 제외 RMSE / bias / 이상치 일수 / 드리프트 여부.
+
+| 배치 (`data/`) | `departures` 생략 (37,000 고정) | `departures` 전송 (실제 출발 여객) |
+|---|---|---|
+| `jeju_demo_batch_normal_41rows.csv` | 2,248 / +605 / 0일 / 드리프트 | 1,892 / +812 / 0일 / 드리프트 |
+| `jeju_demo_batch_sep_oct_41rows.csv` | 3,608 / +323 / 0일 / 아님 | 3,195 / +604 / 0일 / **드리프트** |
+| `jeju_demo_drift_batch_41rows.csv` | 1,991 / −438 / 2일 / 아님 | 2,749 / −66 / 1일 / 아님 |
+| `jeju_demo_drift_batch_after_41rows.csv` | 1,824 / +708 / 2일 / 드리프트 | 1,735 / +413 / 2일 / **아님** |
+| `jeju_demo_drift_batch_confirm_41rows.csv` | 2,409 / +530 / 2일 / 드리프트 | 2,189 / +30 / 2일 / **아님** |
+| `jeju_demo_drift_batch_normal_41rows.csv` | 1,033 / +446 / 0일 / 아님 | 1,031 / +451 / 0일 / 아님 |
+| `jeju_demo_drift_batch_rollback_41rows.csv` | 3,417 / −792 / 0일 / 드리프트 | 2,897 / −1,028 / 0일 / 드리프트 |
+| `jeju_demo_shift_batch_drift_41rows.csv` | 2,515 / +2,034 / 0일 / 드리프트 | 2,425 / +1,919 / 0일 / 드리프트 |
+| `jeju_demo_shift_batch_normal_41rows.csv` | 1,401 / +163 / 0일 / 아님 | 1,156 / +116 / 0일 / 아님 |
+| `jeju_drift_batch_41rows.csv` | 2,101 / −228 / 2일 / 아님 | 2,235 / +28 / 2일 / 아님 |
+
+- 10개 중 3개에서 드리프트 판정이 바뀐다. 같은 모델로 전체 CSV 21일 윈도우 995개를 재면 10.3%에서 바뀐다 (bias 차이 평균 +13, 범위 −375 ~ +634).
+- 게이트와 같은 80/20 분할(test 2025-04-12 ~ 10-31, 203일) RMSE: 실제 출발 여객 2,347 / 37,000 고정 2,682 / 전날 값 복사 2,734.
+- 길이가 다른 `departures`(41 vs 40)는 422. 시연 순서의 Production 모델(v1 → v2 → …) 기준 값은 미측정.
+
 ### 트러블슈팅
 
 - 2026-10-01 | 실험 | 드리프트 시연 정상 배치로 잡은 2024-05-21~06-30이 v1로 RMSE 2,820 → 임계값 초과 | 원인: `train_test_split`이 마지막 20%를 검증으로 떼어 이 구간이 학습에 안 들어감 + 06-29 하루 −7,598 | 해결: 학습 구간 안쪽 2024-04-15~05-25(2,374 / +252)로 교체 | 전후: 2,820 → 2,374
@@ -407,6 +427,7 @@ function batchArrivals(kind, n) {
 - 2026-10-01 | 실험 | 판정을 bias만으로, 롤백 조건을 "승격 뒤 첫 재학습 게이트 실패"로, `BIAS_THRESHOLD` 1,500 확정, 승격 시 윈도우 초기화, `high_error` → `structure_drift` | 실험 5 (정책 시뮬레이션) 및 전체 루프 재실행 — 정상 ok → 드리프트 v2 → 재학습 실패 롤백 v1 → ok → 구조 드리프트 알림 → 폭설 재학습 실패 유지 | exp/drift-anomaly (main 미반영)
 - 2026-10-01 | 실험 | 학습 데이터 결항일 보간(5번)에 맞춰 `BIAS_THRESHOLD` 1,500 → 500, fine-tune 3 epoch(2번). 시연 배치 재선정 | 실험 6 + 서버 경유 전체 루프 실측 (위 "보간 데이터 실측"): ok → −1,041 v2 → 확정 → +686 v3 → −1,008 게이트 2,742 실패 롤백 v2 → 폭설 structure_drift. 하루 전진 시뮬레이션과 수치 일치 | exp/clean-cancellation (main 미반영)
 - 2026-10-01 | B | B 담당 파일 4개 + 이 섹션만 `main`용 PR로 분리 (`feat/b-monitoring`). A·C·E 선행 PR 요청은 "다른 영역에 요청" | 코드는 exp/clean-cancellation과 동일, `python -m compileall -q data scripts serving_app` 통과. main에서는 A의 TODO 1 전이라 `MODEL_SOURCE=mlflow` 루프 미실행 | feat/b-monitoring
+- 2026-10-01 | E (A·B 영역 수정, 팀 공유 필요) | `BatchTestRequest`에 선택 항목 `departures` 추가, `batch_test()`가 있으면 실제 출발 여객으로 예측, 없으면 37,000 고정 유지. 판정 로직·임계값은 그대로 | `python -m unittest discover -s tests` 8개 통과(신규 2개), `python -m compileall -q data scripts serving_app` 통과, `TestClient` 왕복으로 배치 10개 × 2조건 실측(위 표), 길이 불일치 422. 임시 서버(포트 8010, `MODEL_SOURCE=local`)에서 `/health` 200, `jeju_demo_shift_batch_normal_41rows.csv` 왕복이 위 표와 일치(1,156 / +116, 생략 시 1,401 / +163). MLflow Production 모델·재학습 루프는 미실행 | feat/e-batch-departures
 
 ---
 
@@ -421,7 +442,7 @@ function batchArrivals(kind, n) {
 - **역할**: 운영 담당자가 보는 화면 하나. 위쪽은 "내일 도착 여객 예측 N명 · 등급"(D1), 아래쪽은 운영 체계가 돌아가는 것을 보여주는 배치 전송·재학습 로그·모델 버전(D2).
 - **구성 요소**
   - [D1] 예측 카드 (`#forecast-card`, 업로드 카드 바로 위): 예측값(천 단위 구분, 명), 혼잡 등급 배지(`.pill.ok/.warn/.err` 재사용), 기준일(입력 마지막 날) → 예측일, `model_version`·`model_registry_version`(응답 그대로), `/predict` 왕복 ms(`performance.now()`), 최근 20일 추이(라이브러리 없이 div 막대 20개 + MM-DD 라벨, 마우스 오버 시 날짜·값), 새로고침 버튼. 실패 시 원문은 `.result-box`에 표시. 함수: `loadForecast()`(흐름 전체), `toSequence()`(Number → 정수 변환), `congestionLevel()`(등급), `summarize422()`(422 detail 요약), `renderForecast()`(상태 4종), `renderTrend()`(막대).
-  - [D2] 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. **CSV 배치 전송**은 브라우저에서 파일을 검증하고 같은 전송 함수에 `arrivals`를 전달한다. 출발 여객은 서버의 기존 고정값 37,000을 유지하며, CSV 시험 파일은 학습용 업로드를 대체하지 않는다.
+  - [D2] 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. **CSV 배치 전송**은 브라우저에서 파일을 검증하고 같은 전송 함수에 `arrivals`와 `departures`(CSV의 `Departures` 열)를 전달한다. 랜덤워크 배치는 `arrivals`만 보내 서버 고정값 37,000을 쓴다. CSV 시험 파일은 학습용 업로드를 대체하지 않는다.
   - [D2] (D1 작성) 두 배치 나란히 비교: 드리프트 시뮬레이션 카드 안 `#cmp-summary`(RMSE·bias 가로 막대 + 기준 점선 2,700 / ±500) + `#cmp-left`·`#cmp-right` 두 칸(타일, 실제 vs 예측 곡선, 오차 막대). 랜덤 정상 → 왼쪽 칸, 랜덤 드리프트 → 오른쪽 칸, CSV → "비교 칸" 라디오(왼쪽 칸 / 오른쪽 칸)로 고른 칸. 보낸 칸의 제목은 출처("랜덤 정상" / "랜덤 드리프트" / "CSV · 파일명 · 기간")와 전송 시각(시:분), 빈 칸은 "아직 전송 안 함"만. 요약 막대 행 이름도 각 칸의 출처(CSV는 파일명 끝부분). 두 칸의 y축 범위를 같게 맞춘다. 인라인 SVG만 사용(라이브러리 없음). 응답 JSON 원문은 `<details>`로 접어 둔다.
   - [D2] 재학습 로그 카드: 목록에서 파일 선택(기본 `aiops.log`), 화면 표시 중 5초마다 조회. `[WARN]`/`[WARNING]`/`[ROLLBACK]` 주의, `[INFO]` 진행, `[OK]` 성공, `[ERROR]` 오류 색 구분. 로그 원문은 HTML로 해석하지 않는다.
   - [D2] Production 버전 표기: `GET /monitor/versions` → 등록 버전·학습 검증 RMSE·생성 시각·서버 식별자를 분리 표시. 성공한 조회 간 버전 변화 표시. 실제 서빙 반영이나 예측 품질 개선을 단정하지 않는다. 실제 C 응답의 `created_at` Unix 밀리초를 한국 시간으로 표시한다(ISO 문자열도 호환). `model_source=local`은 Registry 미조회로 표시한다. `registry_error`는 조회 실패로 표시하고 `serving_registry_version`은 실제 서빙 번호로 표시한다. `stale=null`은 일치 미확인으로 유지한다.
@@ -521,7 +542,7 @@ function batchArrivals(kind, n) {
 ### 다른 영역에 요청
 
 - C: 최신 main에서 `registry_error`, `serving_registry_version`, `stale` 비교 구현 확인. D2 화면에서 조회 실패·등록 모델 없음·서빙 번호를 구분한다.
-- B: `BatchTestRequest`에 `departures`를 넣을지 결정. 이번 D2 변경은 `arrivals`만 전송한다.
+- B (**완료**, `feat/e-batch-departures`): `BatchTestRequest`에 선택 항목 `departures` 추가. CSV 배치는 `departures`를 함께 전송한다.
 - A/C: 최신 main 공통 테스트 6개 중 2개 실패: `serving_run_id` 키 누락(`KeyError`)과 run_id 없는 경우 `stale=None` 기대/실제 False의 불일치. 최신 C는 등록 번호 비교 정책이다. 팀 API 계약과 테스트 정합성 확인 요청. D2 범위 밖 코드는 수정하지 않았다.
 - E: 최신 main에도 `CLAUDE.md`·`PROJECT_PLAN.md` 일부에 “main은 10 epoch/팀 합의 전”이 남아 있지만 현재 코드는 3 epoch이며 보간 데이터도 병합됐다. `API_SPEC.md`에는 완료 API가 여전히 TODO/설계안이다. 문서 충돌을 알리며 D2에서 정책을 임의 변경하지 않는다. 이번 변경은 판정 기준·공통 상수를 바꾸지 않고 서버 상태를 표시한다. 파이프라인 공통 상수의 `RMSE vs 임계치` 문구도 현행 판정에 맞춘 정리 요청. 상단 `MODEL_SOURCE=mlflow 기준` 문구는 실행 모드와 무관한 고정값이므로 추후 정리 요청(이번 서버는 실제 mlflow 모드). 임시 DB 파일은 최신 main에서 삭제된 것을 확인했다. D1 현황에 남은 recent 미구현 표기도 최신 C 코드와 다름.
 
@@ -549,6 +570,8 @@ function batchArrivals(kind, n) {
 - 2026-10-01 16:50 | youjin09222/D1 | 비교 영역에서 방향 표기 제거(칸 제목 = 출처, 빈 칸은 안내만, 요약 행 이름 = 출처, CSV 선택만 "왼쪽 칸/오른쪽 칸"). 버그 수정: 칸 키를 left/right로 바꾼 뒤에도 요약이 `stats.normal`/`stats.drift`를 확인해 요약 막대가 그려지지 않던 문제 | `node --check` 통과, 저장된 실제 응답으로 렌더링: 제목 "랜덤 정상 오후 4:26 전송", 요약 SVG 2개, RMSE 막대 폭 45.3/181.3px = 독립 계산, 헤드리스 Chrome 화면 확인 | feat/d-dashboard-compare / #23
 
 - 2026-10-01 | D2 | main 976b069의 D1 예측 카드와 PR #20 충돌 해결. init에서 D1 예측과 D2 모니터 조회를 모두 시작하며 두 담당자의 상태·측정·변경 기록 보존 | 기존 화면 점검 53개 통과, compileall 통과. `/tmp/d2-init-merge-check.cjs`로 D1 함수·기록 보존 및 예측 대기 중 D2 초기화/주기 조회 진행 확인 | feat/d2-monitor-main
+
+- 2026-10-01 | E (D2 영역 수정, 팀 공유 필요) | CSV 배치가 `Departures` 열을 `departures`로 함께 전송 (`parseBatchCsv()`가 `departures` 반환, `sendBatch(kind, csv)`). 랜덤워크 배치는 `arrivals`만. 안내 문구 수정 | `node --check` 통과, `parseBatchCsv()`를 node로 실행해 `jeju_demo_batch_normal_41rows.csv` 41행의 도착·출발 값이 CSV와 일치. 브라우저 화면 확인은 미실행 | feat/e-batch-departures
 
 ## 5. 데이터·상수·통합 — 담당 E
 
@@ -590,7 +613,7 @@ function batchArrivals(kind, n) {
 | 이상치 기준 `ANOMALY_THRESHOLD` (브랜치) | 하루 오차 10,000명 | `serving_app/monitoring/drift_detector.py` — 팀 결정 전 |
 | fine-tune epoch `FINE_TUNE_EPOCHS` (브랜치) | **3** (`main` 10) | `serving_app/train_and_register.py` — 2번 참고, 팀 합의 필요 |
 | 입력 시퀀스 길이 `SEQ_LEN` | 20일 | `data/features.py` |
-| 시뮬레이션 고정 출발 여객 `SIMULATED_DEPARTURES` | 37,000명 | `serving_app/routers/predict.py` |
+| 시뮬레이션 고정 출발 여객 `SIMULATED_DEPARTURES` | 37,000명 (`batch-test` 요청에 `departures`가 없을 때만) | `serving_app/routers/predict.py` |
 | MLflow 모델 이름 | `Airport_Arrivals_Predictor` | `serving_app/model_loader.py`, `serving_app/train_and_register.py` |
 
 - 결측·결항 처리 (브랜치 `exp/clean-cancellation`): 도착 < 25,000인 날 18일(2023-01-24 결측 포함)을 양옆 가장 가까운 정상일 평균으로 보간한다. `main`은 2023-01-24 1건만 보간. 이유와 효과는 `data/README.md` "가공 규칙" — 결항일이 스케일러를 압축하고 MSE를 지배해 모델이 20일 이동평균으로 퇴화하던 것이 풀린다 (평상시 RMSE 2,415 → 1,807, 예측 표준편차 445 → 1,898). 시도했다 버린 것: 요일·공휴일·연휴 피처 (`exp/calendar-features`, 2,344 → 2,695로 악화), 학습 기간 축소, 로그 변환 등 데이터 변형 A~G 중 보간(B)만 효과.
@@ -632,3 +655,4 @@ function batchArrivals(kind, n) {
 - 2026-09-30 21:40 | 초기 작성 | 데이터와 상수 현재 값 기록 | 해당 없음 | main
 - 2026-10-01 | E | 섹션을 담당자별로 재편, 아키텍처·측정값·증빙을 섹션 안으로 이동, 사전 실험 수치 기록 | 해당 없음 | main
 - 2026-10-01 | 실험 | `prepare_jeju_data.py`에 결항일(도착 < 25,000) 보간 추가, `jeju_airport_arrivals.csv`·학습 컷 4개 재생성, 드리프트 시연 컷 재선정(배치 raw / 학습 보간본), `falsealarm` 배치를 `sep_oct`로 개명 | `python scripts/prepare_jeju_data.py` → 18일 보간, 1,035행. 기초 통계 보간본 기준으로 갱신. 루프 실측은 3번 | exp/clean-cancellation (main 미반영)
+- 2026-10-01 | E | `batch-test`에 `departures` 전달: 선택 항목으로 받도록 구현 (CSV 배치는 실제 출발 여객 전송, 랜덤워크는 37,000 고정 유지). 상수 표의 `SIMULATED_DEPARTURES` 설명 갱신. 코드·측정은 1·3·4번 섹션 | 3번 측정값 "출발 여객 고정 vs 실제" 표. `data/README.md` 시연 순서 수치는 고정값 조건 값이라 재측정 필요(미측정) | feat/e-batch-departures

@@ -39,8 +39,11 @@
 ## POST /predict/batch-test
 요청 — 최소 21개(SEQ_LEN+1), 시뮬레이션은 41개(SEQ_LEN 20 + WINDOW_SIZE 21) 전송:
 ```json
-{"arrivals": [37012.5, 36880.1, "...", 38104.9]}
+{"arrivals": [37012.5, 36880.1, "...", 38104.9], "departures": [36367, 37145, "...", 42853]}
 ```
+`departures`는 선택 항목이다. `arrivals`와 같은 날짜·같은 길이의 일별 출발 여객 수이며, 길이가 다르면 `422`.
+생략하면 서버가 모든 날을 `SIMULATED_DEPARTURES`(37,000명)로 채운다. 대시보드의 CSV 배치는 함께 보내고, 랜덤워크 배치와 `scripts/simulate_drift.py`는 생략한다.
+
 응답:
 ```json
 {

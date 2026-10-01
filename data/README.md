@@ -16,6 +16,10 @@
 
 데이터 선정 배경·상세는 팀 노션 [데이터 페이지](https://app.notion.com/p/3eb56fb7f28f80cf9758c1c949158d99) 참고.
 
+> **아래 시연 순서 세 개의 "확인된 결과"는 모두 `/predict/batch-test`가 출발 여객을 37,000명으로 고정하던 조건에서 잰 값이다.**
+> 브랜치 `feat/e-batch-departures`부터 대시보드 CSV 배치는 CSV의 `Departures`를 함께 보내므로 RMSE·bias·판정·버전 번호가 달라질 수 있다 (서버 경유 재측정 전, 미측정).
+> 로컬 baseline 모델로 잰 조건별 차이는 `docs/code_current.md` 3번 측정값 "출발 여객 고정 vs 실제" 표. 기존 수치를 재현하려면 `departures` 없이 `arrivals`만 보낸다.
+
 ## 시연 순서 (브랜치 `exp/clean-cancellation`, 보간 데이터 · bias 500 · fine-tune 3 epoch, 임시 워크트리, PC 1대, 1회)
 
 | 순서 | 파일 | 하는 일 | 확인된 결과 |
