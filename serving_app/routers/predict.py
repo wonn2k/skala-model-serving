@@ -18,7 +18,8 @@ router = APIRouter()
 # monitoring/drift_detector.py의 WINDOW_SIZE(21)만큼만 유지한다.
 recent_predictions: list[dict] = []
 
-# 시뮬레이션 배치는 도착 여객 수만 주입하므로, 출발 여객 수는 이 고정값(명)으로 채운다.
+# 랜덤워크 시뮬레이션 배치는 도착 여객 수만 주입하므로, 출발 여객 수는 이 고정값(명)으로 채운다.
+# 요청에 departures가 오면(실제 데이터 CSV 배치) 이 값 대신 그 값을 쓴다.
 # (대상 공항의 일평균 출발 여객 규모 - 실제 데이터 확정 후 평균값으로 갱신)
 SIMULATED_DEPARTURES = 37_000
 
@@ -45,8 +46,8 @@ def batch_test(req: BatchTestRequest):
 
       1) req.arrivals 에서 길이 SEQ_LEN짜리 슬라이딩 윈도우를 만들어 각 윈도우 다음의
          실제 도착 여객 수(actual)를 예측(predicted)과 함께 얻는다.
-         (출발 여객 수는 SIMULATED_DEPARTURES 고정값 - 실전 피처와 100% 동일하지
-          않아도 시뮬레이션 목적에는 충분하다.)
+         (출발 여객 수는 req.departures가 오면 같은 날짜의 실제값, 없으면
+          SIMULATED_DEPARTURES 고정값 - 학습·/predict와 같은 피처로 판정하려면 함께 보낸다.)
       2) 예측 결과를 {"predicted": ..., "actual": ...} 형태로 recent_predictions 에 누적한다.
       3) check_and_trigger(recent_predictions) 로 드리프트 여부를 확인한다.
     """
@@ -54,9 +55,10 @@ def batch_test(req: BatchTestRequest):
     predictions: list[float] = []
 
     arrivals = req.arrivals
+    departures = req.departures if req.departures is not None else [SIMULATED_DEPARTURES] * len(arrivals)
     for i in range(len(arrivals) - SEQ_LEN):
         window = arrivals[i : i + SEQ_LEN]
-        sequence = [{"arrivals": a, "departures": SIMULATED_DEPARTURES} for a in window]
+        sequence = [{"arrivals": a, "departures": d} for a, d in zip(window, departures[i : i + SEQ_LEN])]
         pred = model.predict_one(sequence)
         actual = arrivals[i + SEQ_LEN]
         predictions.append(pred)

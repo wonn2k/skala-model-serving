@@ -403,7 +403,7 @@
     <div class="control-panel section-head">
       <label for="batch-csv-input">시험용 CSV 선택</label>
       <p id="batch-csv-help">시험용 CSV는 학습 자료로 저장되지 않습니다. 재학습에는 위에서 업로드한 최신 학습 자료를 사용합니다.</p>
-      <details class="help-details"><summary>시험 파일 조건</summary><p>Date, Arrivals, Departures 열과 연속된 최소 41일(입력 20일 + 비교 21일)이 필요합니다. 도착 여객만 전송하며, 출발 여객은 서버에서 37,000명으로 고정합니다.</p></details>
+      <details class="help-details"><summary>시험 파일 조건</summary><p>Date, Arrivals, Departures 열과 연속된 최소 41일(입력 20일 + 비교 21일)이 필요합니다. CSV의 도착·출발 여객을 함께 전송합니다. 랜덤 배치는 출발 여객을 서버에서 37,000명으로 고정합니다.</p></details>
       <div class="upload-row" style="margin-top:10px;">
         <input type="file" id="batch-csv-input" accept=".csv,text/csv" aria-describedby="batch-csv-help batch-csv-summary" onchange="previewCsvBatch()" />
         <button id="batch-csv-send" class="btn primary" data-batch-action onclick="sendCsvBatch()" disabled>CSV 배치 전송</button>
@@ -1319,6 +1319,7 @@ function parseBatchCsv(text) {
   });
   if (rows.length < SEQ_LEN + WINDOW_SIZE) throw new Error("시험용 CSV에는 헤더를 제외하고 최소 41일의 데이터가 필요합니다.");
   let previous = null;
+  const departures = [];
   const arrivals = rows.map((values, index) => {
     if (values.length !== header.length) throw new Error(`${index + 2}행의 열 개수가 헤더와 다릅니다.`);
     const date = values[columns[0]];
@@ -1333,9 +1334,10 @@ function parseBatchCsv(text) {
         throw new Error(`${index + 2}행의 ${header[column]} 값은 0 이상의 정수여야 합니다.`);
       }
     }
+    departures.push(Number(values[columns[2]]));
     return Number(values[columns[1]]);
   });
-  return { arrivals, start: rows[0][columns[0]], end: rows[rows.length - 1][columns[0]] };
+  return { arrivals, departures, start: rows[0][columns[0]], end: rows[rows.length - 1][columns[0]] };
 }
 
 async function previewCsvBatch() {
@@ -1367,17 +1369,19 @@ function updateBatchControls() {
 
 async function sendCsvBatch() {
   if (!csvBatch || batchSending) return;
-  await sendBatch("csv", csvBatch.arrivals);
+  await sendBatch("csv", csvBatch);
 }
 
 /* ===================== 드리프트 배치 전송 ===================== */
-async function sendBatch(kind, csvArrivals = null) {
+// csv = parseBatchCsv 결과. CSV 배치는 같은 날짜의 출발 여객을 함께 보내고, 랜덤워크 배치는 도착 여객만 보낸다
+async function sendBatch(kind, csv = null) {
   if (batchSending) return;
   const statusEl = document.getElementById("drift-status");
   const resultBox = document.getElementById("drift-result");
   const n = SEQ_LEN + WINDOW_SIZE;
   const sigma = kind === "drift" ? DRIFT_SIGMA : NORMAL_SIGMA;
-  const arrivals = csvArrivals || randomWalk(n, DEFAULT_BASE_ARRIVALS, sigma);
+  const arrivals = csv ? csv.arrivals : randomWalk(n, DEFAULT_BASE_ARRIVALS, sigma);
+  const payload = csv ? { arrivals, departures: csv.departures } : { arrivals };
   const target = batchTarget(kind);
   batchSending = true;
   updateBatchControls();
@@ -1388,7 +1392,7 @@ async function sendBatch(kind, csvArrivals = null) {
   statusEl.innerHTML = `<span class="pill warn"><span class="dot"></span>전송 중… (fine-tuning이 걸리면 수십 초 걸릴 수 있습니다)</span>`;
 
   try {
-    const res = await fetch("/predict/batch-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ arrivals }) });
+    const res = await fetch("/predict/batch-test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = await safeJson(res);
     if (!res.ok) {
       const reason = `시험 요청 실패 (HTTP ${res.status}) · 아래 응답과 서버 실행 기록을 확인하세요`;
