@@ -38,7 +38,7 @@ RMSE_GATE = 2700.0  # 배포 게이트 (명): 일별 도착 여객 예측 오차
 MODEL_NAME = "Airport_Arrivals_Predictor"
 SCALER_PATH = "serving_app/models/scaler.pkl"
 BASE_EPOCHS = 100  # 3층 LSTM + 3년치 데이터 기준, RMSE가 안정적으로 게이트 아래로 수렴하는 지점
-FINE_TUNE_EPOCHS = 10
+FINE_TUNE_EPOCHS = 3  # 원본 10. bias 500 트리거와 묶어 3/10/30 비교: 많이 돌릴수록 최근 3주에 과적합해 게이트 실패가 늘고 RMSE가 나빠짐 (실험 6)
 FINE_TUNE_LR = 1e-4  # base 학습(1e-3)보다 낮은 학습률로 살짝만 갱신
 
 

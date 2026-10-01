@@ -6,10 +6,14 @@
 출력:   data/jeju_airport_arrivals.csv
     컬럼: Date, Arrivals(=도착여객), Departures(=출발여객)   # 전체여객은 사용하지 않음
 
-처리 규칙 (팀 가공본과 동일):
-    - 도착·출발이 모두 0인 날(결측, 2023-01-24 1건)은 전날·다음날 평균으로 보간한다.
-      (0을 그대로 두면 스케일러 min이 0으로 잡혀 정규화 범위가 왜곡되고, 학습 타깃에도 가짜 급락이 생김)
-    - 그 외 값은 손대지 않는다. 폭설 결항 등 실제 급감일(예: 2025-02-07 6,088명)은 실데이터이므로 유지.
+처리 규칙:
+    - 도착 여객이 CANCEL_ARRIVALS(25,000명) 미만인 날(결측 0 포함, 폭설·강풍 결항일)은 양옆의 정상일 평균으로 보간한다.
+      결항일이 이어지면 그 바깥의 정상일을 쓴다.
+      이유: 결항일을 두면 (1) 스케일러 min이 1,042로 잡혀 정상 범위 30,000~45,000이 0.63~0.96으로 압축되고
+      (2) 결항일 하나의 제곱오차가 평상시 수백 일치보다 커서 모델이 평균만 내는 쪽으로 수렴한다.
+      보간 후 같은 코드로 학습하면 평상시 RMSE 2,415 → 1,807, 예측 표준편차 445 → 1,898 (docs/code_current.md 5번).
+    - 결항일의 실제 값은 data/raw/ 원자료와 data/jeju_drift_batch_41rows.csv(이상 탐지 시연용)에 남아 있다.
+      모니터링은 raw 입력을 받으며, 하루 오차 > 10,000은 이상치로 따로 처리한다 (serving_app/monitoring/drift_detector.py).
 
 실행: python scripts/prepare_jeju_data.py
 """
@@ -24,18 +28,29 @@ OUT_PATH = "data/jeju_airport_arrivals.csv"
 
 RAW_DATE, RAW_ARR, RAW_DEP = "운항일자", "도착여객(명)", "출발여객(명)"
 
+CANCEL_ARRIVALS = 25_000  # 이 미만이면 결항일로 보고 보간 (정상 범위 30,000~45,000, 결항일 1,042~24,000)
+
+
+def interpolate_cancellations(rows, threshold=CANCEL_ARRIVALS):
+    """rows: [(date, arr, dep)]. arr < threshold 인 날을 양옆의 가장 가까운 정상일 평균으로 바꾼다."""
+    normal = [i for i, (_, arr, _) in enumerate(rows) if arr >= threshold]
+    out = []
+    for i, (date, arr, dep) in enumerate(rows):
+        if arr < threshold:
+            prev = max((j for j in normal if j < i), default=None)
+            nxt = min((j for j in normal if j > i), default=None)
+            nb = [rows[j] for j in (prev, nxt) if j is not None]
+            arr, dep = (round(sum(r[1] for r in nb) / len(nb)), round(sum(r[2] for r in nb) / len(nb)))
+            print(f"[interpolate] {date}: {rows[i][1]},{rows[i][2]} -> {arr},{dep}")
+        out.append((date, arr, dep))
+    return out
+
 
 def main():
     with open(RAW_PATH, encoding="utf-8") as f:
         rows = [(r[RAW_DATE], int(r[RAW_ARR]), int(r[RAW_DEP])) for r in csv.DictReader(f)]
 
-    out = []
-    for i, (date, arr, dep) in enumerate(rows):
-        if arr == 0 and dep == 0 and 0 < i < len(rows) - 1:
-            arr = round((rows[i - 1][1] + rows[i + 1][1]) / 2)
-            dep = round((rows[i - 1][2] + rows[i + 1][2]) / 2)
-            print(f"[interpolate] {date}: 0,0 -> {arr},{dep} (이웃 평균)")
-        out.append((date, arr, dep))
+    out = interpolate_cancellations(rows)
 
     with open(OUT_PATH, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)

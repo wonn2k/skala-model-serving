@@ -15,7 +15,9 @@ import math
 RMSE_THRESHOLD = 2700.0  # 명 - serving_app/train_and_register.py의 RMSE_GATE와 동일
 WINDOW_SIZE = 21  # 최근 21건 기준
 ANOMALY_THRESHOLD = 10_000.0  # 명 - 하루 오차가 이 값을 넘으면 이상치(결항 등). 평상시 최대 하루 오차(~8,000)보다 크게
-BIAS_THRESHOLD = 1_500.0  # 명 - 평균 오차가 한쪽으로 이만큼 치우치면 수요 수준이 바뀐 것. 1,000/1,500/2,000 시뮬레이션 중 재학습 최소·RMSE 최저 (실험 5)
+BIAS_THRESHOLD = 500.0  # 명 - 평균 오차가 한쪽으로 이만큼 치우치면 수요 수준이 바뀐 것.
+# 결항일 보간 학습 뒤 21일 bias는 ±1,000 안에서 움직여 1,500이면 2025년에 3월 한 번만 걸린다. 500이면 윈도우가 찰 때마다
+# (승격 뒤 21일) 작은 수준 변화도 따라가 사실상 3주 주기 재학습이 된다 - fine-tune 3 epoch와 묶어 RMSE 3,038 → 3,017 (실험 6).
 
 
 def compute_rmse(recent_predictions: list[dict]) -> float:
