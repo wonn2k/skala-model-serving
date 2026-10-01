@@ -56,6 +56,19 @@ def status():
 
     rows = load_rows(path)
     arrivals = [r["Arrivals"] for r in rows]
+
+    # recent: 대시보드가 "내일 예측"을 띄우려면 최근 SEQ_LEN(20)일을 그대로 /predict에
+    # 실어 보내야 한다. 프론트가 CSV를 다시 읽지 않아도 되도록 여기서 잘라 준다.
+    # 순서는 오래된 날 -> 최근 날. PredictRequest.sequence가 요구하는 순서와 같다.
+    recent = [
+        {
+            "date": r["Date"],
+            "arrivals": int(r["Arrivals"]),
+            "departures": int(r["Departures"]),
+        }
+        for r in rows[-SEQ_LEN:]
+    ]
+
     return {
         "exists": True,
         "filename": os.path.basename(path),
@@ -64,4 +77,5 @@ def status():
         "end_date": rows[-1]["Date"],
         "min_arrivals": min(arrivals),
         "max_arrivals": max(arrivals),
+        "recent": recent,
     }
