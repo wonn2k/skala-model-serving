@@ -41,7 +41,7 @@
 | 3 | `jeju_demo_drift_train_until_20250401.csv` (822행) | 업로드 | 재학습 데이터의 마지막 41행 = 드리프트 구간 |
 | 4 | `jeju_demo_drift_batch_41rows.csv` (2025-02-20 ~ 04-01) | `/predict/batch-test` | RMSE 4,321 / bias **−3,056** → 드리프트 → fine-tuning 게이트 2,491 통과 → **v2** |
 | 5 | `jeju_demo_drift_train_until_20250512.csv` (863행) | 업로드 | 다음 윈도우용 |
-| 6 | `jeju_demo_drift_batch_after_41rows.csv` (2025-04-02 ~ 05-12) | `/predict/batch-test` | v2로 RMSE 3,918 / bias **+2,394** — 부호 반전 → **롤백 → v1** |
+| 6 | `jeju_demo_drift_batch_after_41rows.csv` (2025-04-02 ~ 05-12) | `/predict/batch-test` | v2로 RMSE 3,918 / bias **+2,394** → 드리프트 → 재학습 게이트 실패 3,769 → 승격 미확정이라 **롤백 → v1** |
 | 7 | (2025-05-13 ~ 06-22, 2025-07-22 ~ 08-31) | `/predict/batch-test` | v1로 2,009 / 2,383 → `ok` |
 | 설명용 | `jeju_drift_batch_41rows.csv` (폭설) | `/predict/batch-test` | 이상치 3일(02-04·05·07, 최대 −29,616) 제외 후 나머지 RMSE 4,323 / bias −3,636 → 드리프트 (2025-01~02 수요 하락 실제) |
 | 설명용 | `jeju_demo_batch_falsealarm_41rows.csv` | `/predict/batch-test` | 이상치 1일(10-11) + 치우침 없는 큰 오차(4,381 / +1,318) → 알림만, 재학습 안 함 |

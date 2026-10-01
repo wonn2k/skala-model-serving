@@ -190,10 +190,10 @@
 - **구성 요소**
   - `routers/predict.py` `batch_test()` (**TODO 3**): `BatchTestRequest.arrivals` 41개 → 길이 20 슬라이딩 윈도우 21개 → 각 윈도우로 예측(출발 여객은 `SIMULATED_DEPARTURES` 고정) → `recent_predictions`에 `{"predicted", "actual"}` 누적(최근 21건 유지) → `check_and_trigger()` → `BatchTestResponse(predictions, drift_check)`.
   - `drift_detector.py`: `compute_rmse()` (**TODO 2**), `compute_bias()` (평균 오차 = 실제 − 예측), `assess(window)` → `{rmse, bias, anomalies, rmse_excl_anomalies, bias_excl_anomalies, drift}`. **두 층 판정**: 하루 오차 > `ANOMALY_THRESHOLD`(10,000)인 날은 이상치로 빼고, 나머지의 RMSE > `RMSE_THRESHOLD`(2,700) **그리고** |bias| > `BIAS_THRESHOLD`(2,000)일 때만 드리프트. `is_drift()`는 `assess()["drift"]`.
-  - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): `assess()` → 이상치 있으면 `[WARN] anomaly` → 드리프트 아니면 `ok` / `anomaly` / `high_error`(오차 크지만 치우침 없음, 재학습 안 함) 반환 → 드리프트면 `[WARN] drift` → 이전 Production 버전 기억 → `latest_upload()` 최근 41행 → `fine_tune()` → 승격 시 `reset_cache()` + `[OK]`. **롤백**: 직전 승격이 있고 다음 윈도우가 반대 부호 bias로 드리프트면 `[ROLLBACK]` — 새 버전 Archived, 이전 버전 Production, `reset_cache()`. 승격 기록은 프로세스 메모리(`_last_promotion`)에만 있다.
+  - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): `assess()` → 이상치 있으면 `[WARN] anomaly` → 드리프트 아니면 `ok` / `anomaly` / `high_error`(오차 크지만 치우침 없음, 재학습 안 함) 반환 → 드리프트면 `[WARN] drift` → 이전 Production 버전 기억 → `latest_upload()` 최근 41행 → `fine_tune()` → 승격 시 `reset_cache()` + `[OK]`. **롤백**: 승격 뒤 첫 판정이 드리프트이고 그 재학습이 게이트에 실패하면 `[ROLLBACK]` — 새 버전 Archived, 이전 버전 Production, `reset_cache()`. 승격 뒤 드리프트 아닌 윈도우가 한 번 나오면 승격 확정(롤백 대상에서 제외). 승격 기록은 프로세스 메모리(`_last_promotion`)에만 있다.
   - `scripts/simulate_drift.py` `send_batch()` (**TODO 5**): 랜덤워크 41일(정상 σ 1.2% / 드리프트 σ 3.6%)을 `/predict/batch-test`로 전송.
   - 로그: `aiops` 로거 → `logs/aiops.log` (`main.py`가 연결) → `GET /logs/aiops.log`로 대시보드가 읽는다.
-- **흐름**: 배치 전송 → `batch_test` → 예측 21건 → `assess` → 이상치 알림 / 치우침 없는 큰 오차 알림 / 드리프트 → (직전 승격과 반대 부호면 롤백) → `fine_tune` → 게이트 → 승격 `[OK]` / 유지.
+- **흐름**: 배치 전송 → `batch_test` → 예측 21건 → `assess` → 이상치 알림 / 치우침 없는 큰 오차 알림 / 드리프트 → `fine_tune` → 게이트 → 승격 `[OK]` / 실패 시 (직전 승격이 미확정이면 롤백, 아니면) 유지.
 - **다른 영역과의 연결**
   - A: `model_loader.get_model()`로 예측, 승격·롤백 뒤 `model_loader.reset_cache()` 호출.
   - C: `fine_tune(rows)`의 반환 `{"promoted", "rmse", "version"}`에 의존. `latest_upload()`로 재학습 데이터를 얻는다. 롤백은 `MlflowClient.transition_model_version_stage`로 Registry 스테이지를 직접 바꾼다.
@@ -219,7 +219,7 @@
 | 정상 배치 2024-04-15~05-25 (v1) | RMSE 2,374 / bias +252 → `ok` | |
 | 드리프트 배치 2025-02-20~04-01 (v1) | RMSE 4,321 / bias −3,056 → 드리프트 → fine-tuning 게이트 2,491 → v2 승격 (14초) | 업로드 ~2025-04-01 |
 | 드리프트 배치 (v2) | RMSE 3,073 / bias −309 | 재학습이 치우침 제거 |
-| 다음 윈도우 2025-04-02~05-12 (v2) | RMSE 3,918 / bias +2,394 → 부호 반전 → **롤백 → v1** | v1로는 3,126 / −396 (`high_error`) |
+| 다음 윈도우 2025-04-02~05-12 (v2) | RMSE 3,918 / bias +2,394 → 드리프트 → v2에서 재학습 게이트 실패 3,769 → 승격 미확정이므로 **롤백 → v1** | v1로는 3,126 / −396 (`high_error`). 재학습된 모델 자체는 이후 3개월 2,023 / 2,773 / 2,366으로 좋았으나 5일 검증(05-08~12)에서 3,769. 같은 5일에서 v1 3,732, v2 3,149 — 5일 표본은 모델 우열을 못 가림 |
 | 2025-05-13~06-22, 07-22~08-31 (v1) | 2,009 / −476, 2,383 / +715 → `ok` | |
 | 오탐 배치 2025-09-01~10-11 (v1) | 이상치 1일(10-11, −11,306) + 나머지 4,381 / +1,318 → `high_error` (재학습 안 함) | |
 | 폭설 배치 (v1) | 이상치 3일(02-04 −12,587, 02-05 −10,940, 02-07 −29,616) + 나머지 4,323 / −3,636 → 드리프트 → fine-tuning 게이트 실패 3,865 → v1 유지 | 재학습 데이터 = 최신 업로드(~05-12) 마지막 41행 |
@@ -231,7 +231,8 @@
 ### 트러블슈팅
 
 - 2026-10-01 | 실험 | 드리프트 시연 정상 배치로 잡은 2024-05-21~06-30이 v1로 RMSE 2,820 → 임계값 초과 | 원인: `train_test_split`이 마지막 20%를 검증으로 떼어 이 구간이 학습에 안 들어감 + 06-29 하루 −7,598 | 해결: 학습 구간 안쪽 2024-04-15~05-25(2,374 / +252)로 교체 | 전후: 2,820 → 2,374
-- 2026-10-01 | 실험 | 재학습 후 다음 윈도우에서 v2가 v1보다 나쁨 (3,918 vs 3,126), v2에서 재재학습은 게이트 실패 | 원인: 41행 fine-tuning이 1분기 저점에 과적응, 2분기 수요 회복 | 해결: 반대 부호 bias 드리프트 시 이전 버전으로 롤백 | 전후: v2 갇힘 → v1 복귀, 이후 윈도우 `ok`
+- 2026-10-01 | 실험 | 재학습 후 다음 윈도우에서 v2가 v1보다 나쁨 (3,918 vs 3,126), v2에서 재재학습은 게이트 실패 | 원인: 41행 fine-tuning이 1분기 저점에 과적응, 2분기 수요 회복. 게이트 5일 검증이 노이즈라 좋은 재재학습 모델도 탈락 | 해결: 승격 뒤 첫 드리프트의 재학습이 게이트 실패하면 이전 버전으로 롤백 (처음엔 "반대 부호 bias" 조건이었으나 "신규 드리프트로 재학습 → 실패 시 롤백"이 설명이 단순해 교체) | 전후: v2 갇힘 → v1 복귀, 이후 윈도우 `ok`
+- 2026-10-01 | 실험 | 예측선이 평평하고 v1은 1분기 내내 실제 위, v2는 4월 이후 내내 실제 아래 | 원인: 모델이 입력 20일 수준이 아니라 학습 기간 평균 쪽으로 예측 (학습 범위 35,000~40,000 밖 입력에 외삽 안 됨). 2025-05~08 예측 표준편차 460 vs 실제 2,444, 전일값 복사 2,083 < LSTM 2,398 | 해결 없음 (피처·학습 흐름 변경 범위 밖). 기획서 ②의 "전일값 복사 3,600보다 25% 좋아야" 근거는 결항일 포함 값이라 수정 필요 | —
 
 ### 증빙
 

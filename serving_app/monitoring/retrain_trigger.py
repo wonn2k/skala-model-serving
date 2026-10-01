@@ -18,9 +18,10 @@ from serving_app.monitoring.drift_detector import RMSE_THRESHOLD, WINDOW_SIZE, a
 
 logger = logging.getLogger("aiops")
 
-# 마지막 승격 기록: 재학습 직후 다음 윈도우에서 반대 방향 드리프트가 나오면(일시적 하락에 과적응) 이전 버전으로 되돌린다.
+# 마지막 승격 기록(아직 확정되지 않은 승격). 승격 뒤 첫 판정이 드리프트이고 그 재학습마저 게이트에 실패하면
+# 새 버전이 일시적 변화에 과적응한 것으로 보고 이전 버전으로 되돌린다. 승격 뒤 한 윈도우라도 드리프트가 아니면 승격 확정.
 # ponytail: 프로세스 메모리에만 저장. 서버 재시작 후에는 롤백 대상을 모른다. 필요하면 MLflow 태그로 옮긴다.
-_last_promotion: dict | None = None  # {"prev": 이전 Production 버전, "new": 승격 버전, "bias": 재학습을 부른 bias}
+_last_promotion: dict | None = None  # {"prev": 이전 Production 버전, "new": 승격 버전}
 
 
 def _production_version() -> str | None:
@@ -31,7 +32,7 @@ def _production_version() -> str | None:
     return vs[0].version if vs else None
 
 
-def _rollback(bias_now: float) -> dict:
+def _rollback(failed_rmse: float) -> dict:
     global _last_promotion
     from mlflow import MlflowClient
     from serving_app import model_loader
@@ -43,18 +44,18 @@ def _rollback(bias_now: float) -> dict:
     c.transition_model_version_stage(MODEL_NAME, new, "Archived")
     model_loader.reset_cache()
     logger.warning(
-        f"[ROLLBACK] drift flipped sign after retrain (trigger bias={_last_promotion['bias']:+.0f}, now {bias_now:+.0f}) "
+        f"[ROLLBACK] retrain after promotion failed gate (rmse={failed_rmse:.0f}) "
         f"- v{new} archived, v{prev} back to Production"
     )
     _last_promotion = None
-    return {"status": "rolled_back", "production_version": prev, "bias": bias_now}
+    return {"status": "rolled_back", "production_version": prev, "rmse": failed_rmse}
 
 
 def check_and_trigger(recent_predictions: list[dict]) -> dict:
     global _last_promotion
     a = assess(recent_predictions)
-    if a["drift"] and _last_promotion and a["bias_excl_anomalies"] * _last_promotion["bias"] < 0:
-        return _rollback(a["bias_excl_anomalies"])
+    if not a["drift"] and len(recent_predictions) >= WINDOW_SIZE:
+        _last_promotion = None  # 승격 뒤 드리프트 없는 윈도우가 한 번 나오면 승격 확정
     if a["anomalies"]:
         # 하루 오차가 아주 큰 날(결항 등)은 재학습으로 배울 수 없다. 알림만 남기고 판정에서 뺀다.
         worst = max(a["anomalies"], key=lambda p: abs(p["actual"] - p["predicted"]))
@@ -93,7 +94,10 @@ def check_and_trigger(recent_predictions: list[dict]) -> dict:
         from serving_app import model_loader
 
         model_loader.reset_cache()  # 다음 /predict부터 새 Production 사용
-        _last_promotion = {"prev": prev, "new": result["version"], "bias": a["bias_excl_anomalies"]}
+        _last_promotion = {"prev": prev, "new": result["version"]}
         logger.info(f"[OK] new_rmse={result['rmse']:.0f} - production promoted: Airport_Arrivals_Predictor v{result['version']}")
         return {"status": "retrain_triggered", "promoted": True, "rmse": result["rmse"], "version": result["version"]}
+    if _last_promotion:
+        # 승격 직후 또 드리프트인데 재학습도 게이트를 못 넘음 - 직전 승격이 일시적 변화에 과적응한 것. 되돌린다.
+        return _rollback(result["rmse"])
     return {"status": "retrain_triggered", "promoted": False, "rmse": result["rmse"]}
