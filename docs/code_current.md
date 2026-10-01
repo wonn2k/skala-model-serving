@@ -182,6 +182,7 @@
 - **A에게**: `LoadedModel`이 `run_id`를 함께 보관해 주면 좋겠다. `_load_from_mlflow()`에서 로드한 모델이 어느 run에서 왔는지 알 수 있으면, `GET /monitor/versions`가 "레지스트리는 v2인데 서버는 v1을 들고 있다"를 자동으로 판정할 수 있다. 지금은 `stale`이 항상 `null`이다.
   재배포 후 캐시가 안 비워지는 문제(수업 가이드 부록1의 6번)를 **대시보드에서 눈으로 볼 수 있게** 만드는 일이라, D2의 버전 표기와도 이어진다. `LoadedModel.__init__`에 `run_id=None` 인자를 하나 늘리는 정도면 충분하다.
 - **D1에게**: `GET /data/status`의 `recent`가 올라갔다. 20건, 오래된 날 → 최근 날 순서이고 그대로 `/predict`의 `sequence`로 보내면 된다 (`arrivals`를 float로만 바꾸면 됨). 확인 완료.
+- **E에게**: `docs/API_SPEC.md`의 `/monitor/versions` 설계안보다 응답 필드가 늘었다. 설계안은 `model_name`, `production`, `serving_version` 셋인데 구현은 `model_source`, `serving_run_id`, `stale`을 더 돌려준다. 레지스트리가 말하는 버전과 서버가 실제로 들고 있는 버전을 나란히 보여주려고 넣었다. API_SPEC은 E 소유라 직접 고치지 않았으니 갱신 부탁한다. 실제 응답 예시는 아래 측정값 표에 있다.
 - **D2에게**: `GET /monitor/versions`가 올라갔다. `production.version`과 `production.rmse`를 쓰면 되고, `stale`은 A의 작업 전까지 `null`이라 표시하지 않는 편이 낫다.
 
 ### 변경 기록
