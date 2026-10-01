@@ -108,6 +108,19 @@
   code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
   footer { color: var(--faint); font-size: 0.76rem; text-align: center; margin: 26px 0 10px; }
 </style>
+<!-- D2 판정 배지 전용: 공통 CSS·파이프라인 단계 색상과 분리 -->
+<style>
+  :is(#drift-status, #drift-legend) .pill[data-drift-state] {
+    color: var(--d2-status-color, var(--muted));
+    background: var(--panel-2);
+    border: 1px solid currentColor;
+  }
+  :is(#drift-status, #drift-legend) [data-drift-state="ok"] { --d2-status-color: var(--ok); }
+  :is(#drift-status, #drift-legend) [data-drift-state="anomaly"] { --d2-status-color: var(--warn); }
+  :is(#drift-status, #drift-legend) [data-drift-state="structure_drift"] { --d2-status-color: #c4a5ff; }
+  :is(#drift-status, #drift-legend) [data-drift-state="retrain_triggered"] { --d2-status-color: var(--accent); }
+  :is(#drift-status, #drift-legend) [data-drift-state="rolled_back"] { --d2-status-color: var(--err); }
+</style>
 </head>
 <body>
 
@@ -169,6 +182,13 @@
       </div>
       <p id="batch-csv-summary" role="status" style="margin-top:10px;">파일을 선택하면 기간과 행 수를 확인할 수 있습니다.</p>
     </div>
+    <div id="drift-legend" class="btn-row" role="group" aria-label="판정 상태 색상 안내">
+      <span class="pill" data-drift-state="ok"><span class="dot" aria-hidden="true"></span>정상</span>
+      <span class="pill" data-drift-state="anomaly"><span class="dot" aria-hidden="true"></span>이상치</span>
+      <span class="pill" data-drift-state="structure_drift"><span class="dot" aria-hidden="true"></span>패턴 변화</span>
+      <span class="pill" data-drift-state="retrain_triggered"><span class="dot" aria-hidden="true"></span>재학습</span>
+      <span class="pill" data-drift-state="rolled_back"><span class="dot" aria-hidden="true"></span>롤백 · 이전 모델 복귀</span>
+    </div>
     <div id="drift-status" role="status" style="margin-top:14px;"></div>
     <div id="drift-result" class="result-box"></div>
   </div>
@@ -204,6 +224,24 @@
     <p id="model-alignment" style="color:var(--muted);">실제 서빙 모델과 등록 모델의 일치 여부는 아직 확인되지 않았습니다.</p>
     <p id="model-change" style="color:var(--muted);" role="status">아직 버전 변화가 관측되지 않았습니다.</p>
     <button class="btn secondary" id="model-refresh" onclick="loadModelVersion()">버전 새로고침</button>
+  </div>
+
+  <!-- ================= 탐지·재학습 이력 (D2) ================= -->
+  <div class="card">
+    <div class="section-head">
+      <h2>탐지·재학습 이력</h2>
+      <p>서버 로그에 남은 시각과 결과를 최근 순으로 보여 줍니다. 시각은 서버 기록 그대로이며 시간대는 로그에 없습니다.
+        같은 요청인지 식별하는 번호가 없어, 겹치는 실행은 연결하지 않습니다. 배포 기준 미통과·중간 오류는 완료 로그가 없을 수 있습니다.</p>
+    </div>
+    <button class="btn secondary" id="history-refresh" onclick="loadRetrainHistory()">이력 새로고침</button>
+    <p id="history-status" role="status" style="color:var(--muted);">이력 조회 중…</p>
+    <div role="region" aria-label="탐지·재학습 이력 표" tabindex="0" style="overflow-x:auto;">
+      <table style="min-width:820px;">
+        <caption style="text-align:left; color:var(--muted); padding:8px 0;">aiops.log 기록 · 등록 버전은 당시 결과이며 현재 서빙 버전과 다를 수 있습니다.</caption>
+        <thead><tr><th scope="col">탐지 시각</th><th scope="col">탐지 내용</th><th scope="col">재학습 시작</th><th scope="col">완료 시각</th><th scope="col">결과</th><th scope="col">등록 버전</th></tr></thead>
+        <tbody id="history-rows"></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- ================= 재학습 로그 ================= -->
@@ -432,8 +470,84 @@ async function openLogFile(name) {
     statusEl.textContent = `${name} 조회 실패 · 다음 갱신 때 다시 시도합니다.`;
   }
 }
+/* ===================== 로그 기반 탐지·재학습 이력 (D2) ===================== */
+let historyLoading = false;
+function parseRetrainHistory(content) {
+  const rows = [], pending = [];
+  const unknown = "확인 불가";
+  const create = (at, reason, result = "완료 기록 없음") => {
+    const row = { detected: at, reason, started: unknown, completed: unknown, result, version: unknown };
+    rows.push(row); return row;
+  };
+  for (const line of content.split("\n")) {
+    const entry = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[(?:INFO|WARNING|WARN|ERROR)\] (.*)$/);
+    if (!entry) continue;
+    const [, at, message] = entry;
+    if (message.startsWith("[WARN] drift detected - ")) {
+      const bias = message.match(/bias=([+-]?\d+)/)?.[1];
+      pending.push(create(at, bias == null ? "수요 수준 변화 · 세부 수치 확인 불가" : `수요 수준 변화 · 실제−예측 평균 ${bias}명`));
+    } else if (message.startsWith("[INFO] retrain triggered")) {
+      // 식별자가 없으므로 탐지 후보가 여러 개면 임의로 짝짓지 않는다.
+      const row = pending.length === 1 && pending[0].started === unknown ? pending[0] : create(unknown, "탐지 연결 확인 불가");
+      if (pending.length > 1 || (pending.length === 1 && pending[0] !== row)) {
+        pending.forEach(item => item.result = "실행 중첩 · 연결 확인 불가");
+        pending.length = 0;
+        row.result = "실행 중첩 · 연결 확인 불가";
+        row.ambiguous = true;
+      }
+      row.started = at;
+      if (!pending.includes(row)) pending.push(row);
+    } else {
+      const promoted = message.match(/^\[OK\] new_rmse=([\d.eE+-]+) - production promoted: Airport_Arrivals_Predictor v(\d+)$/);
+      const rollback = message.match(/^\[ROLLBACK\] retrain after promotion failed gate \(rmse=([\d.eE+-]+)\) - v(\d+) archived, v(\d+) back to Production$/);
+      if (promoted || rollback) {
+        const row = pending.length === 1 && pending[0].started !== unknown && !pending[0].ambiguous ? pending[0] : create(unknown, "시작·탐지 연결 확인 불가");
+        pending.forEach(item => { if (item !== row) item.result = "완료 연결 확인 불가"; });
+        pending.length = 0;
+        row.completed = at;
+        row.result = promoted ? `새 모델 등록 · 학습 RMSE ${promoted[1]}명` : `이전 모델 복귀 · 학습 RMSE ${rollback[1]}명`;
+        row.version = `v${promoted ? promoted[2] : rollback[3]}`;
+      } else if (message.startsWith("[WARN] anomaly on ") || message.startsWith("[WARN] structure drift ")) {
+        const days = message.match(/anomaly on (\d+) day/)?.[1];
+        const rmse = message.match(/rmse=([\d.eE+-]+)/)?.[1];
+        const reason = message.startsWith("[WARN] anomaly") ? `일부 날짜의 큰 오차 · ${days ?? "확인 불가"}일` : `변동 패턴 변화 · 예측 오차(RMSE) ${rmse ?? "확인 불가"}명`;
+        const row = create(at, reason, "재학습 없음 (해당 알림)");
+        row.started = row.completed = row.version = "해당 없음";
+      }
+    }
+  }
+  return rows.reverse();
+}
+async function loadRetrainHistory() {
+  if (historyLoading) return;
+  historyLoading = true;
+  const status = document.getElementById("history-status");
+  const body = document.getElementById("history-rows");
+  document.getElementById("history-refresh").disabled = true;
+  try {
+    const response = await readMonitorJson("/logs/aiops.log");
+    if (!response.ok || typeof response.data?.content !== "string") throw new Error(`HTTP ${response.status}`);
+    const rows = parseRetrainHistory(response.data.content);
+    body.replaceChildren();
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      for (const key of ["detected", "reason", "started", "completed", "result", "version"]) {
+        const td = document.createElement("td"); td.textContent = row[key]; tr.append(td);
+      }
+      body.append(tr);
+    }
+    status.textContent = rows.length ? `${rows.length}건 · 마지막 조회 ${new Date().toLocaleTimeString("ko-KR")} · 완료 기록 없음은 실행 중·실패 여부를 확정할 수 없습니다.` : "표시할 탐지·재학습 기록이 없습니다.";
+  } catch (error) {
+    body.replaceChildren();
+    status.textContent = `이력을 확인할 수 없습니다 (${error.message}). 아래 원본 로그도 확인하세요.`;
+  } finally {
+    historyLoading = false;
+    document.getElementById("history-refresh").disabled = false;
+  }
+}
+
 function refreshMonitorPanels() {
-  return Promise.allSettled([loadModelVersion(), loadLogFiles()]);
+  return Promise.allSettled([loadModelVersion(), loadLogFiles(), loadRetrainHistory()]);
 }
 
 /* ===================== 파이프라인 시각화 ===================== */
@@ -612,6 +726,7 @@ async function sendBatch(kind, csvArrivals = null) {
       structure_drift: ["warn", "변동 패턴 변화 감지 · 재학습 없음"],
       rolled_back: ["warn", "배포 기준 미통과 · 이전 모델로 복귀"],
     };
+    const state = ["ok", "anomaly", "structure_drift", "retrain_triggered", "rolled_back"].includes(check.status) ? check.status : "unknown";
     let [level, label] = labels[check.status] || ["neutral", "판정 확인 필요 (아래 서버 응답 참고)"];
     if (check.status === "retrain_triggered" && check.promoted) {
       level = "ok"; label = `재학습 완료 · 새 버전 승격 (학습 검증 RMSE=${check.rmse?.toFixed?.(0) ?? check.rmse}명)`;
@@ -621,7 +736,7 @@ async function sendBatch(kind, csvArrivals = null) {
       level = "warn"; label = "드리프트 감지 · 재학습 트리거됨";
     }
     statusEl.innerHTML = `
-      <span class="pill ${level}"><span class="dot"></span>${label}</span>
+      <span class="pill ${level}" data-drift-state="${state}"><span class="dot" aria-hidden="true"></span>${label}</span>
       <span class="pill neutral" style="margin-left:6px;">이번 배치 전체 예측 오차(RMSE): ${clientRmse != null ? clientRmse.toFixed(0) : "-"}명</span>`;
     showResult(resultBox, data, false);
   } catch (e) {
