@@ -420,22 +420,27 @@ function batchArrivals(kind, n) {
 
 - **역할**: 운영 담당자가 보는 화면 하나. 위쪽은 "내일 도착 여객 예측 N명 · 등급"(D1), 아래쪽은 운영 체계가 돌아가는 것을 보여주는 배치 전송·재학습 로그·모델 버전(D2).
 - **구성 요소**
-  - [D1] 예측 카드: 예측값, 날짜, 혼잡 등급, 최근 20일 추이(표 또는 간단한 차트), 새로고침 버튼.
+  - [D1] 예측 카드 (`#forecast-card`, 업로드 카드 바로 위): 예측값(천 단위 구분, 명), 혼잡 등급 배지(`.pill.ok/.warn/.err` 재사용), 기준일(입력 마지막 날) → 예측일, `model_version`·`model_registry_version`(응답 그대로), `/predict` 왕복 ms(`performance.now()`), 최근 20일 추이(라이브러리 없이 div 막대 20개 + MM-DD 라벨, 마우스 오버 시 날짜·값), 새로고침 버튼. 실패 시 원문은 `.result-box`에 표시. 함수: `loadForecast()`(흐름 전체), `toSequence()`(Number → 정수 변환), `congestionLevel()`(등급), `summarize422()`(422 detail 요약), `renderForecast()`(상태 4종), `renderTrend()`(막대).
   - [D2] 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. **CSV 배치 전송**은 브라우저에서 파일을 검증하고 같은 전송 함수에 `arrivals`를 전달한다. 출발 여객은 서버의 기존 고정값 37,000을 유지하며, CSV 시험 파일은 학습용 업로드를 대체하지 않는다.
   - [D2] 재학습 로그 카드(스켈레톤): `GET /logs/aiops.log` 주기 조회, `[WARN]`/`[INFO]`/`[OK]` 색 구분.
   - [D2] Production 버전 표기: `GET /monitor/versions` → 버전·RMSE·생성 시각. 재학습 전후 변화 표시.
   - 데이터 업로드 카드(스켈레톤): `POST /data/upload`.
 - **흐름**
-  - [D1] 페이지 로드 → `GET /data/status` → `recent` 20행 → `POST /predict` → `predicted_arrivals` → 등급 판정(Q3 40,177명 초과 혼잡 / Q1 34,962명 미만 여유 / 그 사이 보통) → 카드 표시. 업로드 데이터가 없으면 "데이터를 먼저 업로드하세요".
+  - [D1] 페이지 로드(`init()`에서 await 없이 호출) 또는 새로고침 버튼 또는 업로드 성공 → `GET /data/status` → `exists=false`면 "데이터를 먼저 업로드하세요" → `recent` 20행(오래된 날 → 최근 날)을 그대로 입력으로 사용 (20행 배열이 아니면 실패 상태) → `{"sequence":[{arrivals, departures} × 20]}` 정수로 `POST /predict` → `predicted_arrivals` → 등급 판정(`CONGESTION_HIGH` 40,177명 초과 혼잡 / `CONGESTION_LOW` 34,962명 미만 여유 / 경계값 포함 그 사이 보통) → 카드 표시. 실패는 422(detail 요약) / 그 밖의 4xx·5xx(상태 코드 + 원문) / 네트워크 오류로 나눠 이 카드 안에서만 표시한다.
   - [D2] CSV 선택 → 파싱 → `batch-test` → `drift_check` 표시 → 로그 카드가 `[WARN]`→`[OK]` 갱신 → 버전 표기 갱신.
 - **다른 영역과의 연결**: C의 `recent` 필드와 `/monitor/versions`. A의 `/predict` 응답 형식(`predicted_arrivals`, `model_version`). B의 `BatchTestRequest` 형식(`arrivals`, 추가되면 `departures`). 스켈레톤 상수 `RMSE_THRESHOLD = 2700`, `DEFAULT_BASE_ARRIVALS = 37000`은 서버 값 복제 — 서버가 바뀌면 함께 (E가 알린다).
-- **설정**: `RMSE_THRESHOLD`, `DEFAULT_BASE_ARRIVALS` (index.html 상단), 등급 경계 상수(`CONGESTION_HIGH = 40177`, `CONGESTION_LOW = 34962`, 이름은 구현 시 확정) — `data/README.md` 사분위와 같게.
+- **설정**: `RMSE_THRESHOLD`, `DEFAULT_BASE_ARRIVALS` (index.html 상단), [D1] 등급 경계 상수 `CONGESTION_HIGH = 40177`, `CONGESTION_LOW = 34962` (index.html `<script>` 상단, 확정) — `data/README.md` 사분위 Q3/Q1과 같게.
 - **실행**: `http://localhost:8000/`
 
 ### 현재 상태
 
 - 스켈레톤 카드 4개가 있다: 데이터 업로드, 드리프트 시뮬레이션, 드리프트 감지 기반 재학습 파이프라인, 재학습 로그.
-- [D1] 예측·혼잡 등급 카드: 미구현. 입력 시퀀스 출처는 C의 `GET /data/status` `recent`(미구현). 그 전에는 `data/jeju_airport_arrivals.csv` 마지막 20행을 직접 넣어 화면만 먼저 만든다.
+- [D1] 예측·혼잡 등급 카드: 구현 (`feat/d1-forecast-card`). 상태 4종(업로드 전 / 로딩 / 성공 / 실패)을 표시한다. 예측·실패가 다른 카드 초기화를 막지 않는다.
+- [D1] 입력 출처: C의 `GET /data/status` `recent` 연결 완료 (main #6). 최신 업로드 파일의 마지막 20행으로 예측한다. 임시 상수(`FALLBACK_RECENT`)와 "임시 데이터" 배지는 제거했다. `recent`가 20행 배열이 아니면 "GET /data/status의 recent가 20행 배열이 아닙니다" 실패 상태를 띄운다.
+- [D1] "내일"은 실제 내일이 아니라 입력 마지막 날 다음날이다 (`data/jeju_airport_arrivals.csv` 업로드 기준 2025-10-31 → 2025-11-01). 카드에 기준일·예측일을 함께 표시한다.
+- [D1] `model_version`은 local이면 `v1-local`, mlflow면 항상 `production`이라 재학습해도 바뀌지 않는다. 버전 변화는 `model_registry_version`으로 보이므로 둘 다 표시한다.
+- [D1] 모델 파일이 없으면 `/predict`가 사유 없는 텍스트 500을 준다. 카드는 "500 서버 오류 (모델 파일 없음 등)"과 원문만 보여 줄 수 있다 (아래 A 요청).
+- [D1] 422는 화면 조작으로는 나지 않는다 (항상 정수 20개 전송). 확인하려면 브라우저 콘솔에서 다음 `/predict` 1회만 마지막 날을 빼고 보내는 명령을 쓴다 (코드에 남지 않고, 한 번 쓰면 원래 `fetch`로 돌아간다): `const _f = window.fetch; window.fetch = (u, o) => { if (u === "/predict") { const b = JSON.parse(o.body); b.sequence.pop(); o = { ...o, body: JSON.stringify(b) }; window.fetch = _f; } return _f(u, o); }; loadForecast();`
 - [D2] CSV 배치 선택·검증·전송 구현: UTF-8(BOM 포함), CRLF, 따옴표, 열 순서 변경 지원. 최소 41일, 날짜 연속성, 필수 열, 0 이상의 정수 확인 후 기간·행 수·예측 비교 일수 표시. 기존 랜덤워크 버튼 유지, 요청 중 중복 전송 방지. Production 버전 UI는 다음 PR에서 연결한다. C의 `/monitor/versions`는 구현되어 있다.
 - [D2] 현재 `batch_test()`는 B가 구현했다. 화면은 `ok`/`anomaly`/`structure_drift`/`retrain_triggered`/`rolled_back`를 구분하며, 알 수 없는 상태를 정상으로 표시하지 않는다. 재학습·승격과 예측 품질 개선은 별도 검증 대상이다. 정상 CSV HTTP 시험과 확정 CSV 버튼 시험은 통합 화면에서 실행했고, 버전·로그 PR에 해당 실측을 기록한다.
 
@@ -443,8 +448,11 @@ function batchArrivals(kind, n) {
 
 | 항목 | 값 | 조건 |
 |---|---|---|
-| [D1] 페이지 로드 → 예측 표시까지 시간 | 미측정 | |
-| [D1] 표시된 예측값 / 등급 (실데이터 마지막 20일 기준) | 미측정 | |
+| [D1] 페이지 로드 → 예측 표시까지 시간 (브라우저 카드 `performance.now()` ms) | v1 카드 44 ms / v3 전환 후 첫 새로고침 187 ms (새 모델 lazy 로드 포함) / 이후 새로고침 2회 미측정 | 브라우저에서 카드에 표시된 값을 작성자가 화면에서 읽음. `MODEL_SOURCE=mlflow`, main `8f22c4e` 기준 위 조건과 같은 서버. 카드 ms는 `/predict` 요청 하나의 왕복(`/data/status` 제외) |
+| [D1] 표시된 예측값 / 등급 (`recent` 2025-10-12~10-31 기준) | local: `predicted_arrivals` 41304.39 → 혼잡 / mlflow: 39980.96 → 보통 (카드 흐름 확인: 39,981 명 · 보통). 브라우저 카드: v1 39,981명 보통 → v3 40,501명 혼잡 | curl `POST /predict`, 본문은 `GET /data/status` `recent` 20행 그대로. local = `v1-local`, `model_registry_version` null. mlflow = `production`, `model_registry_version` "1". 카드 흐름은 index.html 스크립트를 node `vm` + DOM 최소 스텁 + 실제 서버 fetch로 `loadForecast()` 실행해 확인(브라우저 화면 아님). 조건: main `8f22c4e`(#6 recent·fine-tune 3 epoch, #7 결항일 보간 CSV) 위로 rebase, `data/uploads`·모델·`mlflow.db`·`mlruns`·`logs` 비운 뒤 보간 CSV 업로드(1035행) → `train_baseline_v1.py`(RMSE 2308) → `train_and_register.py`(RMSE 2363, v1 Production). macOS PC 1대, Python 3.12.13, uvicorn 단일 프로세스, `LOADING_MODE=lazy` |
+| [D1] `/predict` 왕복 시간, `MODEL_SOURCE=local` (curl `time_total`) | 1회차 1.829673s (lazy 모델 로드 포함) / 2회차 0.015298s / 3회차 0.014600s | 위 조건, 서버 기동 후 학습 → 첫 요청부터 3회 연속, 같은 20행 입력 |
+| [D1] `/predict` 왕복 시간, `MODEL_SOURCE=mlflow` (curl `time_total`) | 1회차 2.556365s (lazy MLflow 모델 로드 포함) / 2회차 0.016117s / 3회차 0.015749s | 위 조건, `MODEL_SOURCE=mlflow`로 서버 재시작 직후 3회 연속, 로컬 sqlite `mlflow.db`, 로드 버전 v1 |
+| [D1] 등급 경계값 (`congestionLevel()`) | 34961 → 여유 / 34962 → 보통 / 40177 → 보통 / 40178 → 혼잡 | index.html `<script>`를 추출해 node `vm`으로 실제 함수 호출 |
 | [D2] 브라우저 CSV 미리보기 | 2025-01-09 ~ 2025-02-18, 41일, 예측 비교 21일 | `jeju_drift_batch_41rows.csv` 실제 파일 선택, 전송 버튼 활성화 확인. 실제 전송은 하지 않음 |
 | [D2] 실제 모델 CSV 배치 RMSE / `drift_check` | 미측정 | 모델 학습·실제 배치 전송 미실행 |
 | [D2] 입력 검증·전송·상태·오류 처리 점검 | 23개 통과 | Node 임시 점검 스크립트(`/tmp/aiops-d2-check.cjs`), 서버 응답 대체. 실제 예측 품질 수치가 아님 |
@@ -456,13 +464,21 @@ function batchArrivals(kind, n) {
 
 - 2026-10-01 | D2 | 브라우저 `ERR_CONNECTION_REFUSED` → 사용자 터미널에 서버 실행 명령이 아직 없었음 → `python -m uvicorn serving_app.main:app --port 8000` 실행 후 대시보드 표시 확인(사용자 캡처). 이후 실제 `/health` 200 확인.
 - 2026-10-01 | D2 | 기존 UI가 `anomaly`·`structure_drift`·`rolled_back`를 기본 정상 문구로 표시 → B가 추가한 상태 분기가 없었음 → 문구와 파이프라인 분기 추가 → 대체 응답으로 상태별 표시 확인.
+- [D1] 모델 학습 전 `/predict` 500
+  - 증상: `curl -X POST localhost:8000/predict -d @req20.json` → `Internal Server Error` / HTTP 500 (본문은 JSON이 아닌 텍스트)
+  - 원인: 서버 로그 ``ValueError: File not found: filepath=serving_app/models/airport_v1.keras. Please ensure the file is an accessible `.keras` zip file.`` — 새 환경이라 로컬 모델 파일이 없었다
+  - 해결 명령: 대시보드 대신 `curl -F file=@data/jeju_airport_arrivals.csv localhost:8000/data/upload` (1035행) → `python scripts/train_baseline_v1.py` (`baseline v1 RMSE = 2517명`)
+  - 전후 결과: 같은 요청이 HTTP 500 → HTTP 200 `{"predicted_arrivals":40924.95,"model_version":"v1-local","model_registry_version":null}`
 
 ### 증빙
 
 | 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
 |---|---|---|---|---|
-| 예측·혼잡 등급 카드 | 내일 예측값과 등급 | 미촬영 | | |
-| 최근 20일 추이 | `recent` 20행 | 미촬영 | | |
+| [D1] 업로드 전 카드 | `exists=false` → "데이터를 먼저 업로드하세요" | 미촬영 | 제안: `docs/snapshots/d1_01_before_upload.png` | |
+| [D1] 예측·혼잡 등급 카드 | 내일 예측값과 등급, `model_version`, 왕복 ms, 최근 20일 추이 | 미촬영 | 제안: `docs/snapshots/d1_02_predict_success.png` | |
+| [D1] 422 실패 카드 | 19개 입력(콘솔 명령) → 422 detail 요약, 다른 카드 정상 | 미촬영 | 제안: `docs/snapshots/d1_03_predict_422.png` | |
+| [D1] 모델 전환 전 카드 | `production` / `model_registry_version` 1, 39,981명 보통, 44 ms | 미촬영 | 제안: `docs/snapshots/d1_04a_version_before.png` | |
+| [D1] 모델 전환 후 카드 | `production` / `model_registry_version` 3, 40,501명 혼잡, 187 ms(새 모델 로드 포함). 사이에 드리프트 배치로 v2(15:29:07, rmse=889 bias=+813 → 재학습 2230), v3(15:29:58, rmse=1619 bias=+739 → 재학습 2269) 승격 (`logs/aiops.log`) | 미촬영 | 제안: `docs/snapshots/d1_04b_version_after.png` | |
 | CSV 선택 미리보기 | 파일 기간·행 수·버튼 활성화 | 촬영 | `/tmp/aiops-d2-csv-preview.jpg` (임시 로컬 증빙) | D2, 2026-10-01 |
 | CSV 배치 전송 결과 | `drift_check` 응답 | 미촬영 | | |
 | 재학습 로그 패널 | `[WARN]` → `[INFO]` → `[OK]` 순서 | 미촬영 | | |
@@ -474,11 +490,16 @@ function batchArrivals(kind, n) {
 - B: `BatchTestRequest`에 `departures`를 넣을지 결정. 이번 D2 변경은 `arrivals`만 전송한다.
 - A/C: 최신 main의 공통 테스트 6개 중 2개 실패 확인: `serving_run_id` 응답 키 누락과 `stale`의 번호 비교 정책/테스트 기대값 불일치. D2는 해당 소스를 수정하지 않는다.
 - E: `API_SPEC.md`·기획서의 RMSE 기준 재학습 설명과 현재 B 코드의 bias 판정이 다르다. 이번 변경은 판정 기준·공통 상수를 바꾸지 않고 서버 상태를 표시한다. 파이프라인 공통 상수의 `RMSE vs 임계치` 문구도 현행 판정에 맞춘 정리 요청.
+- [D1] A: 모델 파일이 없을 때 `/predict`가 사유 없는 텍스트 500(`Internal Server Error`)을 준다. 사유가 담긴 JSON 오류 응답(예: 503 + `{"detail": "모델 파일 없음: serving_app/models/airport_v1.keras"}`) 검토 요청. 카드는 `detail`이 오면 그대로 표시할 수 있다.
+- [D1] D2·B: 파이프라인 카드의 "드리프트 감지" 단계 설명 `RMSE vs 임계치`(index.html `PIPELINE_STAGES`)가 실제 판정과 다르다. 실제로는 bias 기준으로 판정해 RMSE가 임계치 2,700보다 낮아도 재학습한다 (`logs/aiops.log` 2026-10-01 15:29:02 `drift detected - rmse=889 bias=+813 … triggering retrain`). 문구 수정(D2)과 판정 기준 표기 확인(B) 요청.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | 스켈레톤 카드 구성 기록 | 해당 없음 | main
 - 2026-10-01 | D2 | CSV 선택·검증·배치 전송, 중복 요청 방지, 서버 판정 상태 표시 보완 | 대체 응답 점검 23개 통과, compileall 통과, `/health` 200. 실제 모델 RMSE·재학습·버전 전환 미측정 | feat/d2-dashboard-batch-and-version
+- 2026-10-01 15:08 | youjin09222/D1 | index.html에 내일 도착 여객 예측·혼잡 등급 카드 추가 (상태 4종, 20일 막대, model_version·registry_version, 왕복 ms, FALLBACK_RECENT 분기) | curl `/predict` 20개 200(local 40924.95 v1-local / mlflow 41799.6 production v3), 19개 422 too_short, 경계값 4건 node 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
+- 2026-10-01 15:27 | youjin09222/D1 | main `8f22c4e` 위로 rebase, C의 `recent` 연결 확인 후 `FALLBACK_RECENT`·임시 데이터 배지·`resolveRecent()` 제거, 측정값을 보간 CSV 기준으로 재측정 | `GET /data/status` recent 20행(정수), curl `/predict` 200(local 41304.39 v1-local / mlflow 39980.96 production v1), 19개 422 too_short, node `loadForecast()` 성공·422·원복 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
+- 2026-10-01 15:32 | youjin09222/D1 | 4번 섹션 측정값에 브라우저 카드 ms·예측값 추가, 증빙 [D1] 5행(버전 전환 전·후 분리, 미촬영·파일명 제안), D2·B에 파이프라인 문구 요청 추가 | 브라우저 카드 v1 39,981명 보통 44 ms → v3 40,501명 혼잡 187 ms (새 모델 로드 포함), 이후 새로고침 2회 미측정. 캡처 미촬영. 버전 1→3은 `logs/aiops.log` 15:29:07 v2·15:29:58 v3 승격 | feat/d1-forecast-card
 
 ## 5. 데이터·상수·통합 — 담당 E
 
