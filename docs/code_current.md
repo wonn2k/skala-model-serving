@@ -189,23 +189,24 @@
 - **역할**: 예측·실제 쌍을 쌓아 오차를 감시하고, 임계값을 넘으면 알림 → 최근 데이터로 fine-tuning → 게이트 재검증 → 재배포까지 사람 없이 잇는다.
 - **구성 요소**
   - `routers/predict.py` `batch_test()` (**TODO 3**): `BatchTestRequest.arrivals` 41개 → 길이 20 슬라이딩 윈도우 21개 → 각 윈도우로 예측(출발 여객은 `SIMULATED_DEPARTURES` 고정) → `recent_predictions`에 `{"predicted", "actual"}` 누적(최근 21건 유지) → `check_and_trigger()` → `BatchTestResponse(predictions, drift_check)`.
-  - `drift_detector.py`: `compute_rmse()` (**TODO 2**), `compute_bias()` (평균 오차 = 실제 − 예측), `assess(window)` → `{rmse, bias, anomalies, rmse_excl_anomalies, bias_excl_anomalies, drift}`. **두 층 판정**: 하루 오차 > `ANOMALY_THRESHOLD`(10,000)인 날은 이상치로 빼고, 나머지의 RMSE > `RMSE_THRESHOLD`(2,700) **그리고** |bias| > `BIAS_THRESHOLD`(2,000)일 때만 드리프트. `is_drift()`는 `assess()["drift"]`.
-  - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): `assess()` → 이상치 있으면 `[WARN] anomaly` → 드리프트 아니면 `ok` / `anomaly` / `high_error`(오차 크지만 치우침 없음, 재학습 안 함) 반환 → 드리프트면 `[WARN] drift` → 이전 Production 버전 기억 → `latest_upload()` 최근 41행 → `fine_tune()` → 승격 시 `reset_cache()` + `[OK]`. **롤백**: 승격 뒤 첫 판정이 드리프트이고 그 재학습이 게이트에 실패하면 `[ROLLBACK]` — 새 버전 Archived, 이전 버전 Production, `reset_cache()`. 승격 뒤 드리프트 아닌 윈도우가 한 번 나오면 승격 확정(롤백 대상에서 제외). 승격 기록은 프로세스 메모리(`_last_promotion`)에만 있다.
+  - `drift_detector.py`: `compute_rmse()` (**TODO 2**), `compute_bias()` (평균 오차 = 실제 − 예측), `assess(window)` → `{rmse, bias, anomalies, rmse_excl_anomalies, bias_excl_anomalies, drift}`. **세 종류 판정**: 하루 오차 > `ANOMALY_THRESHOLD`(10,000)인 날은 이상치로 빼고, 나머지의 |bias| > `BIAS_THRESHOLD`(1,500)이면 **수준 드리프트**(재학습). bias 작은데 RMSE > `RMSE_THRESHOLD`(2,700)이면 **구조 드리프트**(알림만). RMSE ≥ |bias|가 항상 성립해 드리프트 조건에 RMSE 항은 없다. `is_drift()`는 `assess()["drift"]`.
+  - `retrain_trigger.py` `check_and_trigger()` (**TODO 4**): `assess()` → 이상치 있으면 `[WARN] anomaly` → 드리프트 아니면 `ok` / `anomaly` / `structure_drift`(오차 크지만 치우침 없음, 재학습 안 함) 반환 → 드리프트면 `[WARN] drift` → 이전 Production 버전 기억 → `latest_upload()` 최근 41행 → `fine_tune()` → 승격 시 `reset_cache()` + 판정 윈도우 `clear()` + `[OK]`. 게이트 실패는 그냥 실패 (재시도 간격 없음, 다음 배치에서 다시 판정). **롤백**: 승격 뒤 첫 판정이 드리프트이고 그 재학습이 게이트에 실패하면 `[ROLLBACK]` — 새 버전 Archived, 이전 버전 Production, `reset_cache()`. 승격 뒤 드리프트 아닌 윈도우가 한 번 나오면 승격 확정(롤백 대상에서 제외). 승격 기록은 프로세스 메모리(`_last_promotion`)에만 있다.
   - `scripts/simulate_drift.py` `send_batch()` (**TODO 5**): 랜덤워크 41일(정상 σ 1.2% / 드리프트 σ 3.6%)을 `/predict/batch-test`로 전송.
   - 로그: `aiops` 로거 → `logs/aiops.log` (`main.py`가 연결) → `GET /logs/aiops.log`로 대시보드가 읽는다.
 - **흐름**: 배치 전송 → `batch_test` → 예측 21건 → `assess` → 이상치 알림 / 치우침 없는 큰 오차 알림 / 드리프트 → `fine_tune` → 게이트 → 승격 `[OK]` / 실패 시 (직전 승격이 미확정이면 롤백, 아니면) 유지.
 - **다른 영역과의 연결**
   - A: `model_loader.get_model()`로 예측, 승격·롤백 뒤 `model_loader.reset_cache()` 호출.
   - C: `fine_tune(rows)`의 반환 `{"promoted", "rmse", "version"}`에 의존. `latest_upload()`로 재학습 데이터를 얻는다. 롤백은 `MlflowClient.transition_model_version_stage`로 Registry 스테이지를 직접 바꾼다.
-  - D2: 배치를 보내는 쪽. `drift_check.status`가 `ok | anomaly | high_error | retrain_triggered | rolled_back` 다섯 가지로 늘었다.
+  - D2: 배치를 보내는 쪽. `drift_check.status`가 `ok | anomaly | structure_drift | retrain_triggered | rolled_back` 다섯 가지로 늘었다.
 - **설정**: `RMSE_THRESHOLD = 2700.0`, `BIAS_THRESHOLD = 2000.0`, `ANOMALY_THRESHOLD = 10000.0`, `WINDOW_SIZE = 21`, `SIMULATED_DEPARTURES = 37_000`, 시뮬레이션 σ 1.2% / 3.6%.
 - **실행**: `python scripts/simulate_drift.py` (서버 기동 후) / 실데이터 배치: `data/jeju_drift_batch_41rows.csv`의 `arrivals` 41개를 `POST /predict/batch-test`
 
 ### 현재 상태
 
 - 이 브랜치(`exp/drift-anomaly`)에서 TODO 2~5 이식됨 (힌트 코드 그대로). `main`에는 아직 TODO 상태.
-- 판정: 두 층 (이상치 / 드리프트) + 롤백. 위 아키텍처 참고. 스켈레톤의 "RMSE > 2,700이면 재학습"에서 바뀐 것이라 **팀 결정 필요**.
-- 판정 기준값 세 개(2,700 / 2,000 / 10,000)는 PC 1대 1회 실험값으로 정했다. 평상시 |bias| 최대 1,886, 평상시 하루 최대 오차 −7,823, 드리프트 배치 bias −3,056, 결항일 오차 −10,940 ~ −29,616.
+- 판정: 세 종류 (이상치 / 수준 드리프트 / 구조 드리프트) + 롤백. 위 아키텍처 참고. 스켈레톤의 "RMSE > 2,700이면 재학습"에서 바뀐 것이라 **팀 결정 필요** — 이 브랜치에서만 적용, `main`은 스켈레톤 그대로.
+- **확정값 (2026-10-01, 브랜치)**: 수준 드리프트 |bias| > **1,500**, 게이트 **2,700**, 이상치 10,000. 근거는 아래 실험 5. 재시도 간격은 두지 않는다(실패는 그냥 실패).
+- 구조 드리프트의 실체: 기간별로 주간 리듬 ac(7)이 0.17(2024 H1) → 0.67(2025 Q3), 요일 진폭이 1,756 → 5,320으로 커졌다. 수준은 같은데 변동 폭이 바뀐 것이라 bias로 안 잡히고, 41행 fine-tuning으로도 안 줄어든다 (실험 2: 3,142 → 3,238). 9~10월 배치가 이 경우다.
 - 남은 이슈: 출발 여객 고정값이 250~950명의 오차를 더한다 (`departures` 전달 여부 미결). 재학습 후 판정 윈도우 초기화 안 함. `_last_promotion`이 메모리에만 있어 서버 재시작 후 롤백 불가.
 - 폭설 배치를 넣으면 이상치 3일을 뺀 나머지도 드리프트(2025-01~02 수요 하락 실제)라 재학습이 돈다. 이때 재학습 데이터는 "최신 업로드의 마지막 41행"이라 배치와 무관한 기간일 수 있다 — 시연 순서에서 업로드 순서를 지켜야 한다.
 
@@ -221,10 +222,12 @@
 | 드리프트 배치 (v2) | RMSE 3,073 / bias −309 | 재학습이 치우침 제거 |
 | 다음 윈도우 2025-04-02~05-12 (v2) | RMSE 3,918 / bias +2,394 → 드리프트 → v2에서 재학습 게이트 실패 3,769 → 승격 미확정이므로 **롤백 → v1** | v1로는 3,126 / −396 (`high_error`). 재학습된 모델 자체는 이후 3개월 2,023 / 2,773 / 2,366으로 좋았으나 5일 검증(05-08~12)에서 3,769. 같은 5일에서 v1 3,732, v2 3,149 — 5일 표본은 모델 우열을 못 가림 |
 | 2025-05-13~06-22, 07-22~08-31 (v1) | 2,009 / −476, 2,383 / +715 → `ok` | |
-| 오탐 배치 2025-09-01~10-11 (v1) | 이상치 1일(10-11, −11,306) + 나머지 4,381 / +1,318 → `high_error` (재학습 안 함) | |
+| 오탐 배치 2025-09-01~10-11 (v1) | 이상치 1일(10-11, −11,306) + 나머지 4,381 / +1,318 → `structure_drift` (재학습 안 함) | |
 | 폭설 배치 (v1) | 이상치 3일(02-04 −12,587, 02-05 −10,940, 02-07 −29,616) + 나머지 4,323 / −3,636 → 드리프트 → fine-tuning 게이트 실패 3,865 → v1 유지 | 재학습 데이터 = 최신 업로드(~05-12) 마지막 41행 |
 | 롤백 없이 v2에서 재재학습 | 게이트 실패 3,769 → v2에 갇힘 (v2는 이후 전 구간 bias +2,300~3,500) | |
 | 재학습 윈도우 41/62/90/120/180행 (v1에서) | after 배치 bias +2,394 / +3,432 / +4,633 / +4,506 / +2,365 — 길어도 과적응 | |
+| **실험 5** 재학습 정책 시뮬레이션 (2025-01-21~08-31 하루씩 전진, 실제 fine-tune, 승격 시 윈도우 초기화, 결항 포함 RMSE) | v1 고정 4,201 / bias>2,000 4,100 (재학습 13, 승격 4) / **bias>1,500 3,942 (9, 6)** / bias>1,000 3,943 (21, 8) / bias>500 3,993 (28, 9) / bias>500·게이트 3,500 4,032 (20, 9) / bias>500·게이트 없음 4,166 (10, 10) / 21일마다 무조건 3,891 (11, 4) / 20일 이동평균 3,651 / 전일값 3,462 | 스크래치 `sim_policy.py`, `sim2.py`. 1,500이 재학습 최소·RMSE 최저. 게이트 없으면 v1 고정 수준으로 악화 |
+| 모델 특성 (2025-05~08, 결항 없음) | LSTM 2,398 vs 전일값 2,083 / 7일 MA 2,380 / 상수(학습평균) 2,446 / 20일 MA 2,543. 예측 std 460 vs 실제 2,444. 20일 MA와 상관 0.927. 전일 대비 방향 적중 67% (MA 63%, 동전 50%) | 변화량 자기상관 lag1 −0.18(평균 회귀), lag7 +0.36(주간). 수준+약한 주기만 배움, 진폭은 MSE가 줄임 |
 | `simulate_drift.py` 랜덤워크 배치 | 미측정 | |
 | 서버(`/predict/batch-test`) 경유 재현 | 미측정 | |
 
@@ -245,13 +248,14 @@
 ### 다른 영역에 요청
 
 - C: 승격 시 이전 Production을 Archived로 내리지 않아 여러 버전이 Production에 남는다. 롤백은 새 버전만 Archived로 내려서 동작하지만, `_register_if_gate_passed`에서 `archive_existing_versions=True`로 하면 깔끔하다.
-- D2: `drift_check.status` 다섯 가지를 카드에 색으로 구분 (`rolled_back`, `anomaly`, `high_error` 추가).
+- D2: `drift_check.status` 다섯 가지를 카드에 색으로 구분 (`rolled_back`, `anomaly`, `structure_drift` 추가).
 - E: 상수 표에 `BIAS_THRESHOLD`, `ANOMALY_THRESHOLD` 추가, ③ 운영 설계 3번을 두 층 판정 + 롤백으로.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | TODO 상태 기록 | 해당 없음 | main
 - 2026-10-01 | 실험 | TODO 2~5 이식, 두 층 판정(이상치/드리프트, bias 조건), 롤백 추가 | 위 측정값 표 전체. 실행: 스크래치 worktree에서 in-process (`exp4*.py`, `scan_ft.py`) | exp/drift-anomaly
+- 2026-10-01 | 실험 | 판정을 bias만으로, 롤백 조건을 "승격 뒤 첫 재학습 게이트 실패"로, `BIAS_THRESHOLD` 1,500 확정, 승격 시 윈도우 초기화, `high_error` → `structure_drift` | 실험 5 (정책 시뮬레이션) 및 전체 루프 재실행 — 정상 ok → 드리프트 v2 → 재학습 실패 롤백 v1 → ok → 구조 드리프트 알림 → 폭설 재학습 실패 유지 | exp/drift-anomaly (main 미반영)
 
 ---
 
@@ -352,7 +356,7 @@
 | 배포 게이트 `RMSE_GATE` | 2,700명 | `serving_app/train_and_register.py`, `scripts/train_baseline_v1.py` |
 | 드리프트 임계값 `RMSE_THRESHOLD` | 2,700명 | `serving_app/monitoring/drift_detector.py` |
 | 판정 윈도우 `WINDOW_SIZE` | 21건 | `serving_app/monitoring/drift_detector.py` |
-| 드리프트 bias 기준 `BIAS_THRESHOLD` (브랜치) | 2,000명 | `serving_app/monitoring/drift_detector.py` — `exp/drift-anomaly`, 팀 결정 전 |
+| 드리프트 bias 기준 `BIAS_THRESHOLD` (브랜치) | 1,500명 | `serving_app/monitoring/drift_detector.py` — `exp/drift-anomaly`에서 확정, `main`에는 없음 |
 | 이상치 기준 `ANOMALY_THRESHOLD` (브랜치) | 하루 오차 10,000명 | `serving_app/monitoring/drift_detector.py` — `exp/drift-anomaly`, 팀 결정 전 |
 | 입력 시퀀스 길이 `SEQ_LEN` | 20일 | `data/features.py` |
 | 시뮬레이션 고정 출발 여객 `SIMULATED_DEPARTURES` | 37,000명 | `serving_app/routers/predict.py` |
