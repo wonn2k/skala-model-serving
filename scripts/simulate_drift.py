@@ -60,14 +60,12 @@ def generate_drift_batch(n=BATCH_N, base=37000.0, sigma=DRIFT_SIGMA):
 
 
 def send_batch(arrivals: np.ndarray, label: str) -> dict:
-    # TODO(Day3): 생성한 배치를 /predict/batch-test 엔드포인트에 순차(또는 일괄) 요청으로 전송하세요.
-    # 힌트:
-    # resp = requests.post(API_URL, json={"arrivals": arrivals.tolist()})
-    # resp.raise_for_status()
-    # result = resp.json()
-    # print(f"[{label}] drift_check = {result['drift_check']}")
-    # return result
-    raise NotImplementedError("send_batch를 구현하세요 (실습 4-2)")
+    """생성한 배치를 /predict/batch-test 엔드포인트에 일괄 전송한다."""
+    resp = requests.post(API_URL, json={"arrivals": arrivals.tolist()})
+    resp.raise_for_status()
+    result = resp.json()
+    print(f"[{label}] drift_check = {result['drift_check']}")
+    return result
 
 
 def main():
