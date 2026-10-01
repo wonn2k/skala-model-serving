@@ -398,8 +398,8 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 
 | 항목 | 값 | 조건 |
 |---|---|---|
-| [D1] 페이지 로드 → 예측 표시까지 시간 (브라우저 카드 `performance.now()` ms) | 미측정 | 브라우저 값 미기록 |
-| [D1] 표시된 예측값 / 등급 (`recent` 2025-10-12~10-31 기준) | local: `predicted_arrivals` 41304.39 → 혼잡 / mlflow: 39980.96 → 보통 (카드 흐름 확인: 39,981 명 · 보통) | curl `POST /predict`, 본문은 `GET /data/status` `recent` 20행 그대로. local = `v1-local`, `model_registry_version` null. mlflow = `production`, `model_registry_version` "1". 카드 흐름은 index.html 스크립트를 node `vm` + DOM 최소 스텁 + 실제 서버 fetch로 `loadForecast()` 실행해 확인(브라우저 화면 아님). 조건: main `8f22c4e`(#6 recent·fine-tune 3 epoch, #7 결항일 보간 CSV) 위로 rebase, `data/uploads`·모델·`mlflow.db`·`mlruns`·`logs` 비운 뒤 보간 CSV 업로드(1035행) → `train_baseline_v1.py`(RMSE 2308) → `train_and_register.py`(RMSE 2363, v1 Production). macOS PC 1대, Python 3.12.13, uvicorn 단일 프로세스, `LOADING_MODE=lazy` |
+| [D1] 페이지 로드 → 예측 표시까지 시간 (브라우저 카드 `performance.now()` ms) | v1 카드 44 ms / v3 전환 후 첫 새로고침 187 ms (새 모델 lazy 로드 포함) / 이후 새로고침 2회 미측정 | 브라우저에서 카드에 표시된 값을 작성자가 화면에서 읽음. `MODEL_SOURCE=mlflow`, main `8f22c4e` 기준 위 조건과 같은 서버. 카드 ms는 `/predict` 요청 하나의 왕복(`/data/status` 제외) |
+| [D1] 표시된 예측값 / 등급 (`recent` 2025-10-12~10-31 기준) | local: `predicted_arrivals` 41304.39 → 혼잡 / mlflow: 39980.96 → 보통 (카드 흐름 확인: 39,981 명 · 보통). 브라우저 카드: v1 39,981명 보통 → v3 40,501명 혼잡 | curl `POST /predict`, 본문은 `GET /data/status` `recent` 20행 그대로. local = `v1-local`, `model_registry_version` null. mlflow = `production`, `model_registry_version` "1". 카드 흐름은 index.html 스크립트를 node `vm` + DOM 최소 스텁 + 실제 서버 fetch로 `loadForecast()` 실행해 확인(브라우저 화면 아님). 조건: main `8f22c4e`(#6 recent·fine-tune 3 epoch, #7 결항일 보간 CSV) 위로 rebase, `data/uploads`·모델·`mlflow.db`·`mlruns`·`logs` 비운 뒤 보간 CSV 업로드(1035행) → `train_baseline_v1.py`(RMSE 2308) → `train_and_register.py`(RMSE 2363, v1 Production). macOS PC 1대, Python 3.12.13, uvicorn 단일 프로세스, `LOADING_MODE=lazy` |
 | [D1] `/predict` 왕복 시간, `MODEL_SOURCE=local` (curl `time_total`) | 1회차 1.829673s (lazy 모델 로드 포함) / 2회차 0.015298s / 3회차 0.014600s | 위 조건, 서버 기동 후 학습 → 첫 요청부터 3회 연속, 같은 20행 입력 |
 | [D1] `/predict` 왕복 시간, `MODEL_SOURCE=mlflow` (curl `time_total`) | 1회차 2.556365s (lazy MLflow 모델 로드 포함) / 2회차 0.016117s / 3회차 0.015749s | 위 조건, `MODEL_SOURCE=mlflow`로 서버 재시작 직후 3회 연속, 로컬 sqlite `mlflow.db`, 로드 버전 v1 |
 | [D1] 등급 경계값 (`congestionLevel()`) | 34961 → 여유 / 34962 → 보통 / 40177 → 보통 / 40178 → 혼잡 | index.html `<script>`를 추출해 node `vm`으로 실제 함수 호출 |
@@ -426,8 +426,9 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 |---|---|---|---|---|
 | [D1] 업로드 전 카드 | `exists=false` → "데이터를 먼저 업로드하세요" | 미촬영 | 제안: `docs/snapshots/d1_01_before_upload.png` | |
 | [D1] 예측·혼잡 등급 카드 | 내일 예측값과 등급, `model_version`, 왕복 ms, 최근 20일 추이 | 미촬영 | 제안: `docs/snapshots/d1_02_predict_success.png` | |
-| [D1] 422 실패 카드 | 19개 입력 → 422 detail 요약, 다른 카드 정상 | 미촬영 | 제안: `docs/snapshots/d1_03_predict_422.png` | |
-| [D1] 모델 전환 후 카드 | `v1-local`/null → `production`/`model_registry_version` 변화 | 미촬영 | 제안: `docs/snapshots/d1_04_model_version_switch.png` | |
+| [D1] 422 실패 카드 | 19개 입력(콘솔 명령) → 422 detail 요약, 다른 카드 정상 | 미촬영 | 제안: `docs/snapshots/d1_03_predict_422.png` | |
+| [D1] 모델 전환 전 카드 | `production` / `model_registry_version` 1, 39,981명 보통, 44 ms | 미촬영 | 제안: `docs/snapshots/d1_04a_version_before.png` | |
+| [D1] 모델 전환 후 카드 | `production` / `model_registry_version` 3, 40,501명 혼잡, 187 ms(새 모델 로드 포함). 사이에 드리프트 배치로 v2(15:29:07, rmse=889 bias=+813 → 재학습 2230), v3(15:29:58, rmse=1619 bias=+739 → 재학습 2269) 승격 (`logs/aiops.log`) | 미촬영 | 제안: `docs/snapshots/d1_04b_version_after.png` | |
 | CSV 선택 미리보기 | 파일 기간·행 수·버튼 활성화 | 촬영 | `/tmp/aiops-d2-csv-preview.jpg` (임시 로컬 증빙) | D2, 2026-10-01 |
 | CSV 배치 전송 결과 | `drift_check` 응답 | 미촬영 | | |
 | 재학습 로그 패널 | `[WARN]` → `[INFO]` → `[OK]` 순서 | 미촬영 | | |
@@ -440,6 +441,7 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 - A/C: 최신 main의 공통 테스트 6개 중 2개 실패 확인: `serving_run_id` 응답 키 누락과 `stale`의 번호 비교 정책/테스트 기대값 불일치. D2는 해당 소스를 수정하지 않는다.
 - E: `API_SPEC.md`·기획서의 RMSE 기준 재학습 설명과 현재 B 코드의 bias 판정이 다르다. 이번 변경은 판정 기준·공통 상수를 바꾸지 않고 서버 상태를 표시한다. 파이프라인 공통 상수의 `RMSE vs 임계치` 문구도 현행 판정에 맞춘 정리 요청.
 - [D1] A: 모델 파일이 없을 때 `/predict`가 사유 없는 텍스트 500(`Internal Server Error`)을 준다. 사유가 담긴 JSON 오류 응답(예: 503 + `{"detail": "모델 파일 없음: serving_app/models/airport_v1.keras"}`) 검토 요청. 카드는 `detail`이 오면 그대로 표시할 수 있다.
+- [D1] D2·B: 파이프라인 카드의 "드리프트 감지" 단계 설명 `RMSE vs 임계치`(index.html `PIPELINE_STAGES`)가 실제 판정과 다르다. 실제로는 bias 기준으로 판정해 RMSE가 임계치 2,700보다 낮아도 재학습한다 (`logs/aiops.log` 2026-10-01 15:29:02 `drift detected - rmse=889 bias=+813 … triggering retrain`). 문구 수정(D2)과 판정 기준 표기 확인(B) 요청.
 
 ### 변경 기록
 
@@ -447,6 +449,7 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 - 2026-10-01 | D2 | CSV 선택·검증·배치 전송, 중복 요청 방지, 서버 판정 상태 표시 보완 | 대체 응답 점검 23개 통과, compileall 통과, `/health` 200. 실제 모델 RMSE·재학습·버전 전환 미측정 | feat/d2-dashboard-batch-and-version
 - 2026-10-01 15:08 | youjin09222/D1 | index.html에 내일 도착 여객 예측·혼잡 등급 카드 추가 (상태 4종, 20일 막대, model_version·registry_version, 왕복 ms, FALLBACK_RECENT 분기) | curl `/predict` 20개 200(local 40924.95 v1-local / mlflow 41799.6 production v3), 19개 422 too_short, 경계값 4건 node 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
 - 2026-10-01 15:27 | youjin09222/D1 | main `8f22c4e` 위로 rebase, C의 `recent` 연결 확인 후 `FALLBACK_RECENT`·임시 데이터 배지·`resolveRecent()` 제거, 측정값을 보간 CSV 기준으로 재측정 | `GET /data/status` recent 20행(정수), curl `/predict` 200(local 41304.39 v1-local / mlflow 39980.96 production v1), 19개 422 too_short, node `loadForecast()` 성공·422·원복 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
+- 2026-10-01 15:32 | youjin09222/D1 | 4번 섹션 측정값에 브라우저 카드 ms·예측값 추가, 증빙 [D1] 5행(버전 전환 전·후 분리, 미촬영·파일명 제안), D2·B에 파이프라인 문구 요청 추가 | 브라우저 카드 v1 39,981명 보통 44 ms → v3 40,501명 혼잡 187 ms (새 모델 로드 포함), 이후 새로고침 2회 미측정. 캡처 미촬영. 버전 1→3은 `logs/aiops.log` 15:29:07 v2·15:29:58 v3 승격 | feat/d1-forecast-card
 
 ## 5. 데이터·상수·통합 — 담당 E
 
