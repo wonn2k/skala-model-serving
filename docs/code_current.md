@@ -30,17 +30,17 @@
 | CSV 업로드 (`POST /data/upload`, `GET /data/status`) | C | 동작 | 스켈레톤 제공. `data/jeju_airport_arrivals.csv` 1,035행 업로드 (PC 1대) |
 | Day1 baseline 학습 (`scripts/train_baseline_v1.py`) | C | 동작 | RMSE 2,571명, 게이트 2,700명 통과 (PC 1대) |
 | Day2 MLflow 학습·게이트·Production 승격 (`serving_app/train_and_register.py`) | C | 동작 | RMSE 2,267명, 게이트 통과 후 Production 승격 (PC 1대) |
-| 예측 서빙 `POST /predict` (로컬 모델) | A | 코드 완성 | 응답 확인 기록 없음 (미측정) |
-| MLflow Production 모델 서빙 (`MODEL_SOURCE=mlflow`) | A | 미구현 | TODO 1 `_load_from_mlflow` |
-| 드리프트 판정 (`POST /predict/batch-test`) | B | 미구현 | TODO 2 `compute_rmse`, TODO 3 `batch_test` |
-| 드리프트 감지 시 자동 재학습 | B | 미구현 | TODO 4 `check_and_trigger` |
-| 드리프트 시뮬레이션 스크립트 | B | 미구현 | TODO 5 `send_batch` |
+| 예측 서빙 `POST /predict` (로컬 모델) | A | 동작 | PR #5. local/lazy 첫 요청 2.04초, 두 번째 0.013초, 입력 오류 422 (1번 측정값) |
+| MLflow Production 모델 서빙 (`MODEL_SOURCE=mlflow`) | A | 동작 | PR #5. TODO 1 이식, `reset_cache()` 추가, `model_registry_version` 응답. mlflow/lazy 첫 요청 3.5초, 두 번째 0.016초 |
+| 드리프트 판정 (`POST /predict/batch-test`) | B | 동작 | PR #3. TODO 2·3 이식, 3종 판정(이상치/수준/구조), `status` 5종 (3번) |
+| 드리프트 감지 시 자동 재학습 | B | 동작 | PR #3. TODO 4 이식, fine-tuning → 게이트 → 승격 시 캐시·윈도우 초기화, 미확정 승격 뒤 실패 시 롤백. A+B 결합 검증 통과 (1번) |
+| 드리프트 시뮬레이션 스크립트 | B | 코드 완성 | PR #3. TODO 5 이식. 랜덤워크 σ가 실변동성보다 낮아 실측 미실행 (3번) |
 | `GET /data/status`의 `recent` (최근 20일) | C | 미구현 | 설계만 있음 (2번 참고) |
 | Production 버전 조회 `GET /monitor/versions` | C | 미구현 | 설계안만 있음 (`docs/API_SPEC.md`) |
 | 대시보드 예측값·혼잡 등급 카드 | D1 (프론트엔드) | 미구현 | |
 | 대시보드 CSV 배치 전송, Production 버전 표기 | D2 (프론트엔드) | 미구현 | 업로드·드리프트 시뮬레이션·재학습 로그 카드는 스켈레톤에 있음 |
-| Docker 컨테이너 재현 | C | 미확인 | TODO 1 구현 전에는 기동 실패 예상 (2번 참고) |
-| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 미실행 (`main`) / 브랜치 실측 | `main` 코드로는 미실행. `exp/clean-cancellation`에서 서버 경유 한 바퀴 실측 — 드리프트 → v2 → 반등 → v3 → 게이트 실패 → 롤백 v2 (3번, 5번) |
+| Docker 컨테이너 재현 | C | 미확인 | TODO 1은 merge됨(PR #5). 빌드·기동 미측정 (2번 참고) |
+| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 브랜치 실측 / `main` 재확인 필요 | `exp/clean-cancellation`(A·B·E 변경 + fine-tune 3 epoch)에서 서버 경유 한 바퀴 실측 — 드리프트 → v2 → 반등 → v3 → 게이트 실패 → 롤백 v2 (3번, 5번). `main`은 A·B merge + 이 PR(보간 데이터) 뒤에도 `FINE_TUNE_EPOCHS`가 10이라 C 변경 전까지 같은 수치가 안 나옴 |
 
 ---
 
