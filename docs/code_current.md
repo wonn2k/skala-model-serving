@@ -155,7 +155,9 @@
 | `GET /data/status`의 `recent` | 20건, `2025-10-12` ~ `2025-10-31`, 오래된 순, arrivals/departures 모두 int | PC 1대, `curl localhost:8000/data/status` |
 | `recent`를 그대로 `/predict`에 전달 | HTTP 200, `{"predicted_arrivals":39772.69,"model_version":"production"}` | PC 1대, `/data/status`의 recent를 `sequence`로 변환해 POST |
 | B 머지 뒤 C API 동작 | `/monitor/versions`, `/data/status`의 `recent`, `recent → /predict` 모두 정상 | PC 1대, `origin/main`(B 포함) 위에 리베이스 후 `MODEL_SOURCE=mlflow ... --port 8000` |
-| fine-tune 3 epoch 전체 루프 | 재학습 전 41283.94 → 후 41547.42로 바뀜 (캐시 갱신 확인). `[OK] new_rmse=2108 v3`, `[OK] new_rmse=1949 v4` | PC 1대, `reset_cache()`를 임시로 넣고 측정. A의 PR 전이라 임시 코드는 커밋하지 않음 |
+| fine-tune 3 epoch 전체 루프 | v1(rmse 2267)에서 드리프트 배치 주입 → `bias=+2015` 감지 → 재학습 → `[OK] new_rmse=1840 v2` 승격. **예측값 39772.69 → 41283.94로 바뀌고 `/monitor/versions`도 v2로 따라감** | PC 1대, mlruns 초기화 후 1회. `reset_cache()`를 임시로 넣고 측정했고 임시 코드는 커밋하지 않음 |
+| 배치별 판정 (윈도우 격리, 배치마다 서버 재기동) | normal `ok` rmse 2280 bias 315 / falsealarm `retrain_triggered` / drift `retrain_triggered` | PC 1대, 각 배치 전에 서버를 다시 띄워 `recent_predictions`를 비운 상태에서 측정 |
+| 윈도우를 안 비웠을 때 | 판정이 배치 순서에 따라 뒤집힘. 같은 세 배치를 한 서버에 연속 주입하면 normal이 `retrain_triggered`, drift가 `ok`로 나옴 | PC 1대. 앞 배치의 예측이 윈도우에 남아 다음 판정에 섞인다 (가이드 부록1의 7번) |
 | Day1 baseline RMSE (이 PC) | 2,945명 | PC 2대째, `python scripts/train_baseline_v1.py`. 다른 PC에서는 2,571명과 2,191명이 나왔다 |
 | Day2 MLflow 학습 RMSE (이 PC) | 2,267명 (2266.94) | PC 2대째, `python serving_app/train_and_register.py`. seed 42 고정이라 다른 PC와 같은 값 |
 
@@ -175,6 +177,7 @@
 
 ### 다른 영역에 요청
 
+- **B에게**: 배치를 연속으로 주입하면 `recent_predictions` 윈도우가 이어져 판정이 뒤집힌다. 같은 세 배치를 한 서버에 연속으로 보내면 normal이 `retrain_triggered`, drift가 `ok`로 나왔다. 배치마다 서버를 다시 띄우면 의도대로 갈린다. 시연 때 배치 사이에 윈도우를 비우는 절차가 필요해 보인다 (가이드 부록1의 7번).
 - **A에게 (급함)**: `model_loader.reset_cache()`가 아직 없어 **승격이 일어나는 순간 `AttributeError`로 `/predict/batch-test`가 500**이 난다. B의 `retrain_trigger.py`가 45행과 97행에서 부른다. 임시로 넣어 보니 전체 루프가 정상 동작했고 재학습 후 예측값도 41283.94에서 41547.42로 바뀌었다.
 - **A에게**: `LoadedModel`이 `run_id`를 함께 보관해 주면 좋겠다. `_load_from_mlflow()`에서 로드한 모델이 어느 run에서 왔는지 알 수 있으면, `GET /monitor/versions`가 "레지스트리는 v2인데 서버는 v1을 들고 있다"를 자동으로 판정할 수 있다. 지금은 `stale`이 항상 `null`이다.
   재배포 후 캐시가 안 비워지는 문제(수업 가이드 부록1의 6번)를 **대시보드에서 눈으로 볼 수 있게** 만드는 일이라, D2의 버전 표기와도 이어진다. `LoadedModel.__init__`에 `run_id=None` 인자를 하나 늘리는 정도면 충분하다.
