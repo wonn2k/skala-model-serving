@@ -120,7 +120,7 @@
 - **구성 요소**
   - `routers/data.py`: `POST /data/upload`(컬럼 `Date,Arrivals,Departures` 검사, 최소 행 수 `SEQ_LEN + WINDOW_SIZE` = 41, `data/uploads/`에 저장) / `GET /data/status`(행 수, 기간, 최소·최대). `data/storage.py`의 `latest_upload()`가 최신 파일 경로를 준다.
   - `scripts/train_baseline_v1.py`: Day1. 최신 업로드로 학습 → 마지막 20% 검증 RMSE → 게이트 → `serving_app/models/airport_v1.keras`, `scaler.pkl` 저장.
-  - `train_and_register.py`: `train_and_register()` — seed 42, 100 epoch → `rmse()` → MLflow run 기록 → `_register_if_gate_passed()`가 통과 시 `Airport_Arrivals_Predictor` 등록 + Production 승격. `fine_tune(rows)` — Production 가중치에서 10 epoch, LR 1e-4, 같은 게이트 (호출은 B의 TODO 4).
+  - `train_and_register.py`: `train_and_register()` — seed 42, 100 epoch → `rmse()` → MLflow run 기록 → `_register_if_gate_passed()`가 통과 시 `Airport_Arrivals_Predictor` 등록 + Production 승격. `fine_tune(rows)` — Production 가중치에서 `FINE_TUNE_EPOCHS`(3) epoch, LR 1e-4, 같은 게이트 (호출은 B의 TODO 4).
   - `routers/monitor.py` (신설 완료): `GET /monitor/versions` → MLflow Registry의 Production 버전·run_id·rmse·created_at과, 서버가 실제로 들고 있는 모델(`serving_version`, `serving_run_id`)을 함께 반환. 둘이 어긋났는지는 `stale`로 표시한다. `MODEL_SOURCE=local`이면 `production`은 null.
   - `Dockerfile`: 이미지 빌드 중 baseline + MLflow 학습 실행, `MODEL_SOURCE=mlflow`, `LOADING_MODE=eager`로 기동.
 - **흐름**: 대시보드 CSV 업로드 → `data/uploads/` → `train_baseline_v1.py`(로컬 모델) → `train_and_register.py`(MLflow run → 게이트 → Registry → Production) → A의 `_load_from_mlflow()`가 읽는다.
@@ -158,6 +158,14 @@
 | fine-tune 3 epoch 전체 루프 | v1(rmse 2267)에서 드리프트 배치 주입 → `bias=+2015` 감지 → 재학습 → `[OK] new_rmse=1840 v2` 승격. **예측값 39772.69 → 41283.94로 바뀌고 `/monitor/versions`도 v2로 따라감** | PC 1대, mlruns 초기화 후 1회. `reset_cache()`를 임시로 넣고 측정했고 임시 코드는 커밋하지 않음 |
 | 배치별 판정 (윈도우 격리, 배치마다 서버 재기동) | normal `ok` rmse 2280 bias 315 / falsealarm `retrain_triggered` / drift `retrain_triggered` | PC 1대, 각 배치 전에 서버를 다시 띄워 `recent_predictions`를 비운 상태에서 측정 |
 | 윈도우를 안 비웠을 때 | 판정이 배치 순서에 따라 뒤집힘. 같은 세 배치를 한 서버에 연속 주입하면 normal이 `retrain_triggered`, drift가 `ok`로 나옴 | PC 1대. 앞 배치의 예측이 윈도우에 남아 다음 판정에 섞인다 (가이드 부록1의 7번) |
+| 컨테이너 기동 (Dockerfile 기본값 `MODEL_SOURCE=mlflow`) | **기동 실패.** `model_loader._load_from_mlflow()`가 `NotImplementedError` → `Application startup failed. Exiting.` | PC 1대, `docker compose -f serving_app/docker-compose.yml up --build`. A의 TODO 1이 들어오기 전까지 기본값으로는 컨테이너가 못 뜬다 |
+| 컨테이너 기동 (`MODEL_SOURCE=local`) | 정상. `/health` `{"status":"ok","model_loaded":true,"loading_mode":"eager"}` | PC 1대, compose에 환경변수 통로를 열고 `MODEL_SOURCE=local docker compose ... up -d` |
+| 컨테이너 `/monitor/versions` (local) | `model_source: "local"`, `serving_version: "v1-local"`, `production: null`, `stale: false` | PC 1대. 로컬 모델은 레지스트리와 비교 대상이 없어 `stale`을 false로 둔다 |
+| 컨테이너 `/monitor/versions` (mlflow, 임시 패치 상태) | `production: {version: 1, rmse: 2266.940748540207}` | PC 1대. `_load_from_mlflow`를 임시로 채워 띄운 빌드에서 측정. **임시 코드는 커밋하지 않음** |
+| 컨테이너 `/data/status` | 1,035행, `2023-01-01` ~ `2025-10-31`, `recent` 20건 (마지막 `2025-10-31` arrivals 42323 / departures 42950) | PC 1대, 이미지 빌드 중 시드된 `build_seed.csv` 기준 |
+| 컨테이너 `recent → /predict` 왕복 | HTTP 200, `{"predicted_arrivals":42096.13,"model_version":"v1-local"}` | PC 1대. 로컬 모델이라 MLflow 경로(39772.69)와는 다른 가중치다 |
+| `/monitor/versions` 응답 시간 (트래킹 서버 무응답) | 재시도 1회 10.68초 → 재시도 없음 **5.70초**. 연결 거부는 0.54초 | PC 1대, `http://10.255.255.1:9999`로 in-process 호출. MLflow 기본값(120초 + 재시도 7회) 기준선은 측정 중 |
+| 오타난 sqlite 트래킹 URI | `production: null`, `registry_error: null` — 조회가 "성공"하고 0건을 돌려준다. MLflow가 그 이름으로 빈 DB를 새로 만들기 때문. `tracking_uri` 값으로만 구분된다 | PC 1대, `MLFLOW_TRACKING_URI=sqlite:////tmp/oops_typo_check.db` |
 | Day1 baseline RMSE (이 PC) | 2,945명 | PC 2대째, `python scripts/train_baseline_v1.py`. 다른 PC에서는 2,571명과 2,191명이 나왔다 |
 | Day2 MLflow 학습 RMSE (이 PC) | 2,267명 (2266.94) | PC 2대째, `python serving_app/train_and_register.py`. seed 42 고정이라 다른 PC와 같은 값 |
 
@@ -178,11 +186,13 @@
 ### 다른 영역에 요청
 
 - **B에게**: 배치를 연속으로 주입하면 `recent_predictions` 윈도우가 이어져 판정이 뒤집힌다. 같은 세 배치를 한 서버에 연속으로 보내면 normal이 `retrain_triggered`, drift가 `ok`로 나왔다. 배치마다 서버를 다시 띄우면 의도대로 갈린다. 시연 때 배치 사이에 윈도우를 비우는 절차가 필요해 보인다 (가이드 부록1의 7번).
+- **A에게 (급함)**: TODO 1 `_load_from_mlflow()`가 없으면 **컨테이너가 기본 설정으로 기동 자체를 못 한다**. Dockerfile이 `MODEL_SOURCE=mlflow` + `LOADING_MODE=eager`라서 기동 시점에 바로 부르고, `NotImplementedError`로 `Application startup failed. Exiting.`이 난다. 임시로 compose에 환경변수 통로를 열어 `MODEL_SOURCE=local`로는 띄울 수 있게 해 뒀지만(로컬 모델이라 예측값이 다르다), 시연은 mlflow 경로로 해야 한다.
 - **A에게 (급함)**: `model_loader.reset_cache()`가 아직 없어 **승격이 일어나는 순간 `AttributeError`로 `/predict/batch-test`가 500**이 난다. B의 `retrain_trigger.py`가 45행과 97행에서 부른다. 임시로 넣어 보니 전체 루프가 정상 동작했고 재학습 후 예측값도 41283.94에서 41547.42로 바뀌었다.
 - **A에게**: `LoadedModel`이 `run_id`를 함께 보관해 주면 좋겠다. `_load_from_mlflow()`에서 로드한 모델이 어느 run에서 왔는지 알 수 있으면, `GET /monitor/versions`가 "레지스트리는 v2인데 서버는 v1을 들고 있다"를 자동으로 판정할 수 있다. 지금은 `stale`이 항상 `null`이다.
   재배포 후 캐시가 안 비워지는 문제(수업 가이드 부록1의 6번)를 **대시보드에서 눈으로 볼 수 있게** 만드는 일이라, D2의 버전 표기와도 이어진다. `LoadedModel.__init__`에 `run_id=None` 인자를 하나 늘리는 정도면 충분하다.
-- **D1에게**: `GET /data/status`의 `recent`가 올라갔다. 20건, 오래된 날 → 최근 날 순서이고 그대로 `/predict`의 `sequence`로 보내면 된다 (`arrivals`를 float로만 바꾸면 됨). 확인 완료.
+- **D1에게**: `GET /data/status`의 `recent`가 올라갔다. 20건, 오래된 날 → 최근 날 순서이고 그대로 `/predict`의 `sequence`로 보내면 된다 — `arrivals`는 이미 정수로 내려가고 `DailyPoint.arrivals`도 `int`라 변환이 필요 없다. 앞서 "float로 바꾸면 됨"이라고 적었던 건 틀렸으니 무시해 달라. 단, CSV에 숫자로 못 읽히는 칸이 있으면 그 항목만 `null`로 내려간다 (500을 피하려고 그렇게 뒀다) — `sequence`에 넣기 전에 `null`이 있는지 확인이 필요하다.
 - **E에게**: `docs/API_SPEC.md`의 `/monitor/versions` 설계안보다 응답 필드가 늘었다. 설계안은 `model_name`, `production`, `serving_version` 셋인데 구현은 `model_source`, `serving_run_id`, `stale`을 더 돌려준다. 레지스트리가 말하는 버전과 서버가 실제로 들고 있는 버전을 나란히 보여주려고 넣었다. API_SPEC은 E 소유라 직접 고치지 않았으니 갱신 부탁한다. 실제 응답 예시는 아래 측정값 표에 있다.
+- **E에게 (급함)**: `.gitignore`에 `*.db`를 넣어 달라. 지금은 `mlflow.db` 한 줄만 있어서 트래킹 URI를 오타 내면 MLflow가 그 이름으로 빈 SQLite를 새로 만들고, `git add -A`에 그대로 쓸려 들어간다. 실제로 876KB 바이너리를 한 번 커밋했다가 지웠다. 같은 이유로 `mlruns/`처럼 `*.sqlite`도 함께 막아 두면 좋겠다.
 - **D2에게**: `GET /monitor/versions`가 올라갔다. `production.version`과 `production.rmse`를 쓰면 되고, `stale`은 A의 작업 전까지 `null`이라 표시하지 않는 편이 낫다.
 
 ### 변경 기록
@@ -190,6 +200,8 @@
 - 2026-09-30 21:40 | 초기 작성 | Day1·Day2 실행 결과 기록 | Day1 RMSE 2,571명 (`python scripts/train_baseline_v1.py`), Day2 RMSE 2,267명 (`python serving_app/train_and_register.py`) | main
 - 2026-10-01 13:10 | 유경모 | `GET /monitor/versions` 신설(`routers/monitor.py`, `main.py` 한 줄), `GET /data/status`에 `recent` 20건 추가 | `/monitor/versions`가 Production v1, rmse 2266.94 반환. `recent`를 그대로 `/predict`에 보내 HTTP 200 확인. Day1 2,945명 / Day2 2,267명 | feat/c-monitor-versions
 - 2026-10-01 14:50 | 유경모 | B 머지본 위로 리베이스. `FINE_TUNE_EPOCHS` 10 → 3 (B의 `BIAS_THRESHOLD` 500이 3 epoch 전제라 같이 움직여야 함) | 충돌 없음(B와 파일이 겹치지 않음). 전체 루프 재학습 전 41283.94 → 후 41547.42. ⚠️ `model_loader.reset_cache()`가 아직 없어 승격 시점에 `AttributeError`로 batch-test가 500이 난다 (A 대기) | feat/c-monitor-versions
+- 2026-10-01 17:20 | 유경모 | 컨테이너 빌드 확인 + 리뷰 지적 반영. `monitor.py`에 MLflow 요청 타임아웃(5초 x 1회, `setdefault`)·`tracking_uri`·`registry_error` 필드 추가, `_model_cache` 접근을 `getattr`로 감쌈. `data.py`의 `int()`를 `_as_count()`로 교체. 실수로 커밋됐던 876KB `does_not_exist_typo.db` 제거 | `docker compose up --build` 성공, 컨테이너 `/health` `{"status":"ok","model_loaded":true,"loading_mode":"eager"}`, `/monitor/versions` Production v1 rmse 2266.94, `/data/status` 1,035행·`recent` 20건. 응답 없는 주소(`http://10.255.255.1:9999`)로 `/monitor/versions` 호출: 재시도 1회 10.68초 → 재시도 없음 **5.70초**. 연결 거부(`127.0.0.1:59999`)는 0.54초. MLflow 기본값(120초 + 재시도 7회) 기준선은 측정 중. 오타난 sqlite URI는 `registry_error`로 안 잡히고(빈 DB 자동 생성) `tracking_uri` 값으로 구분 | feat/c-monitor-versions
+- 2026-10-01 17:50 | 유경모 | `docker-compose.yml`에 `environment` 추가 (`MODEL_SOURCE`/`LOADING_MODE`를 `${VAR:-기본값}`으로 받게) | Dockerfile 기본값(`mlflow`+`eager`)으로는 A의 TODO 1이 없어 컨테이너가 기동 실패한다는 것을 빌드해 보고 확인. `MODEL_SOURCE=local`로 띄워 `/health`·`/monitor/versions`·`/data/status`·`/predict` 전부 200 (예측 42096.13) | feat/c-monitor-versions
 
 ---
 
@@ -282,7 +294,7 @@
 ### 다른 영역에 요청
 
 - A (**선행 필요**): TODO 1 `_load_from_mlflow()` 이식, `model_loader.reset_cache()` 추가 (`_model_cache = None`). `retrain_trigger`가 승격·롤백 뒤 호출한다. 구현은 `exp/clean-cancellation`의 `model_loader.py` 참고.
-- C (**선행 필요**): `FINE_TUNE_EPOCHS` 10 → 3 (실험 6: 3/10/30 epoch → 게이트 실패 3/8/16회). 승격 시 이전 Production을 Archived로 내리지 않아 여러 버전이 Production에 남는다 — `_register_if_gate_passed`에서 `archive_existing_versions=True` 권장.
+- C (**완료**): `FINE_TUNE_EPOCHS` 10 → 3 (실험 6: 3/10/30 epoch → 게이트 실패 3/8/16회) — 이 PR에 들어갔다. 남은 것: 승격 시 이전 Production을 Archived로 내리지 않아 여러 버전이 Production에 남는다 — `_register_if_gate_passed`에서 `archive_existing_versions=True` 권장.
 - E (**선행 필요**): `scripts/prepare_jeju_data.py` 결항일(도착 < 25,000) 보간 + `jeju_airport_arrivals.csv`·시연 컷 재생성, CLAUDE.md 상수 표에 `BIAS_THRESHOLD`·`ANOMALY_THRESHOLD`·`FINE_TUNE_EPOCHS`·`CANCEL_ARRIVALS`, `data/README.md` 시연 순서. 구현·값은 `exp/clean-cancellation` 참고.
 - D2: `drift_check.status` 다섯 가지를 카드에 색으로 구분 (`rolled_back`, `anomaly`, `structure_drift` 추가). 대시보드 상단 `RMSE_THRESHOLD` 복제 상수는 그대로(2,700, 구조 드리프트 알림 기준).
 
