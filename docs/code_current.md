@@ -35,12 +35,12 @@
 | 드리프트 판정 (`POST /predict/batch-test`) | B | 동작 | PR #3. TODO 2·3 이식, 3종 판정(이상치/수준/구조), `status` 5종 (3번) |
 | 드리프트 감지 시 자동 재학습 | B | 동작 | PR #3. TODO 4 이식, fine-tuning → 게이트 → 승격 시 캐시·윈도우 초기화, 미확정 승격 뒤 실패 시 롤백. A+B 결합 검증 통과 (1번) |
 | 드리프트 시뮬레이션 스크립트 | B | 코드 완성 | PR #3. TODO 5 이식. 랜덤워크 σ가 실변동성보다 낮아 실측 미실행 (3번) |
-| `GET /data/status`의 `recent` (최근 20일) | C | 미구현 | 설계만 있음 (2번 참고) |
-| Production 버전 조회 `GET /monitor/versions` | C | 미구현 | 설계안만 있음 (`docs/API_SPEC.md`) |
-| 대시보드 예측값·혼잡 등급 카드 | D1 (프론트엔드) | 미구현 | |
-| 대시보드 CSV 배치 전송, Production 버전 표기 | D2 (프론트엔드) | 미구현 | 업로드·드리프트 시뮬레이션·재학습 로그 카드는 스켈레톤에 있음 |
-| Docker 컨테이너 재현 | C | 미확인 | TODO 1은 merge됨(PR #5). 빌드·기동 미측정 (2번 참고) |
-| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 브랜치 실측 / `main` 재확인 필요 | `exp/clean-cancellation`(A·B·E 변경 + fine-tune 3 epoch)에서 서버 경유 한 바퀴 실측 — 드리프트 → v2 → 반등 → v3 → 게이트 실패 → 롤백 v2 (3번, 5번). `main`은 A·B merge + 이 PR(보간 데이터) 뒤에도 `FINE_TUNE_EPOCHS`가 10이라 C 변경 전까지 같은 수치가 안 나옴 |
+| `GET /data/status`의 `recent` (최근 20일) | C | 동작 | PR #6. 20건(2025-10-12~10-31), 오래된 순, 정수. `recent` → `/predict` 전달 시 HTTP 200 확인 (2번 측정값) |
+| Production 버전 조회 `GET /monitor/versions` | C | 동작 | 구현 완료. A의 `run_id`(PR #9) 연결로 `stale` 실판정 — 컨테이너 3단계 재현 false → true → false (2번 측정값) |
+| 대시보드 예측값·혼잡 등급 카드 | D1 (프론트엔드) | 동작 | main 머지(#20). 브라우저 카드 실측: v1 39,981명 보통 44 ms → v3 40,501명 혼잡 187 ms (4번 측정값) |
+| 대시보드 CSV 배치 전송, Production 버전 표기 | D2 (프론트엔드) | 동작 | PR #14·#16·#23 머지. CSV 검증·전송, 버전·로그 5초 조회, 비교 차트 실측 (4번 측정값) |
+| Docker 컨테이너 재현 | C | 동작 | 빌드 8단계(`--no-cache`, 이미지 3.26GB), `up --build` 정상 기동, 컨테이너 전체 시연 실측 완료 (2번 측정값) |
+| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 동작 | `main` 위 컨테이너에서 `data/README.md` 수준 이동 시연 1~6번이 소수점까지 재현(2,363.50 / 1,409.99 / +76.14 / 1,892.76 / 1,423.24 / 1,619.16 / +239.10), 전체 시연 실측도 README 첫 표와 정수까지 일치 (2번 측정값). 코드 상수 확인: `FINE_TUNE_EPOCHS=3`, `BIAS_THRESHOLD=500` (2026-10-01, 이 PC) |
 
 ---
 
@@ -145,6 +145,8 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 - 2026-10-01T14:39:52+09:00 | 윤동현/A | B PR #3이 병합된 main(de32913)을 A 브랜치에 충돌 없이 반영 | 기존 로더 테스트 8개·compileall 통과. 실제 HTTP MLflow/lazy 정상 200, 잘못된 입력 4종 422. 복제 registry에서 실제 B 승격·롤백 후 A 로드 버전 1→2→1, 승격 없는 게이트 실패 시 캐시 유지, 정상 배치 21개/판정 창 21개 확인 (`logs/ab-integration.json`, `logs/a-b-unit-results.log`, `logs/a-b-http-lazy.log`). 학습 결과는 mock, v2는 v1 artifact 재사용, 정상 배치는 상수 모델이므로 재학습 품질 검증은 아님. C의 3 epoch·E의 보간 데이터 반영 후 전체 정책 검증 필요 | feat/a-mlflow-serving / PR #5
 
 - 2026-10-01T15:25:14+09:00 | 윤동현/A | C 요청의 run_id 연결 및 연속 배치 진단 | 신규 6개/기존 8개 통과, 실제 학습·HTTP 8000에서 v1→v2→v3→v2 및 stale false/true/false 확인. B/C 런타임 코드·임계값·E 데이터 미변경 | fix/a-serving-run-id
+
+- 2026-10-01 18:10 | E (프롬프트 5, 코드 수정 없음) | 기획서 ⑤ 생성을 위한 전 엔드포인트 실호출. 8000은 사용 중이라 측정용 8001 + 복사본 레지스트리(`MLFLOW_TRACKING_URI=sqlite:////…/spec_mlflow.db`)로 서버 기동 후 seed 42 학습 v1(rmse 2363) 등록. 호출: `GET /health`(전·후) · `GET /data/status` · `POST /predict`(recent 20행 200 → 39980.96/v1, 19개·음수 422, Production 없음 상태 500) · `POST /data/upload`(정상 1,035행 200, Departures 누락 400) · `GET /logs`·`/logs/aiops.log` · `GET /monitor/versions`(예측 전 serving null/stale null, 후 stale false/run_id) · `POST /predict/batch-test`(`jeju_demo_shift_batch_normal_41rows.csv`+departures → ok rmse 1191.34 bias +85.67, 길이 불일치 422). 실행 명령: `MLFLOW_TRACKING_URI=… MODEL_SOURCE=mlflow LOADING_MODE=lazy .venv/bin/python -m uvicorn serving_app.main:app --port 8001` · `MLFLOW_TRACKING_URI=… .venv/bin/python serving_app/train_and_register.py` · 이후 urllib 실호출. 결과는 `docs/API_SPEC.md`·`docs/proposal/05_api_spec.md`에 반영. 루트 `mlflow.db`는 빈 레지스트리 확인(미변경) | feat/e-batch-departures (문서만)
 
 ---
 
