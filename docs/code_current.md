@@ -121,7 +121,7 @@
 - **구성 요소**
   - `routers/data.py`: `POST /data/upload`(컬럼 `Date,Arrivals,Departures` 검사, 최소 행 수 `SEQ_LEN + WINDOW_SIZE` = 41, `data/uploads/`에 저장) / `GET /data/status`(행 수, 기간, 최소·최대). `data/storage.py`의 `latest_upload()`가 최신 파일 경로를 준다.
   - `scripts/train_baseline_v1.py`: Day1. 최신 업로드로 학습 → 마지막 20% 검증 RMSE → 게이트 → `serving_app/models/airport_v1.keras`, `scaler.pkl` 저장.
-  - `train_and_register.py`: `train_and_register()` — seed 42, 100 epoch → `rmse()` → MLflow run 기록 → `_register_if_gate_passed()`가 통과 시 `Airport_Arrivals_Predictor` 등록 + Production 승격. `fine_tune(rows)` — Production 가중치에서 10 epoch, LR 1e-4, 같은 게이트 (호출은 B의 TODO 4).
+  - `train_and_register.py`: `train_and_register()` — seed 42, 100 epoch → `rmse()` → MLflow run 기록 → `_register_if_gate_passed()`가 통과 시 `Airport_Arrivals_Predictor` 등록 + Production 승격. `fine_tune(rows)` — Production 가중치에서 `FINE_TUNE_EPOCHS`(브랜치 3, `main` 10) epoch, LR 1e-4, 같은 게이트 (호출은 B의 TODO 4).
   - `routers/monitor.py` (신설 예정): `GET /monitor/versions` → MLflow Registry에서 Production 버전·run_id·RMSE·생성 시각 (`docs/API_SPEC.md`).
   - `Dockerfile`: 이미지 빌드 중 baseline + MLflow 학습 실행, `MODEL_SOURCE=mlflow`, `LOADING_MODE=eager`로 기동.
 - **흐름**: 대시보드 CSV 업로드 → `data/uploads/` → `train_baseline_v1.py`(로컬 모델) → `train_and_register.py`(MLflow run → 게이트 → Registry → Production) → A의 `_load_from_mlflow()`가 읽는다.
