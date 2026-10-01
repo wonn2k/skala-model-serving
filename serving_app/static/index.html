@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AIOps · 공항 도착 여객 예측 재학습 파이프라인</title>
+<title>항공기 도착 여객 예측 AIOps (운영 대시보드)</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <style>
   :root {
@@ -293,6 +293,7 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#overview">본문으로 건너뛰기</a>
 
 <div class="topnav">
   <div class="brand">
@@ -300,26 +301,31 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-10 2 3h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <div class="brand-text">
-      <div class="title">AIOps · 공항 도착 여객 예측</div>
-      <div class="subtitle">드리프트 감지 기반 재학습 파이프라인</div>
+      <div class="title">AIRPORT <span style="color:var(--accent)">/</span> AIOps</div>
+      <div class="subtitle">항공기 도착 여객 예측 · 운영 모니터링</div>
     </div>
   </div>
+  <nav class="nav-links" aria-label="대시보드 구역">
+    <a href="#overview">운영 개요</a><a href="#batch-card">배치 시험</a><a href="#logs-card">운영 기록</a>
+  </nav>
   <div class="nav-right">
-    <span class="pill neutral">MODEL_SOURCE=mlflow 기준</span>
+    <span class="pill neutral">운영자 대시보드</span>
   </div>
 </div>
 
-<div class="page">
+<main class="page" id="overview">
+  <div class="page-heading">
+    <div><div class="eyebrow">AIRPORT OPERATIONS</div><h1>항공기 도착 여객 예측 AIOps (운영 대시보드)</h1><p>여객 수 전망부터 모델의 변화까지, 한눈에 확인하세요.</p></div>
+    <span>예측 · 모니터링 · 재학습</span>
+  </div>
 
   <!-- ================= 내일 도착 여객 예측 (D1) ================= -->
   <div class="card" id="forecast-card">
     <div class="section-head-row">
       <div class="section-head">
-        <h2>내일 도착 여객 예측 · 혼잡 등급</h2>
-        <p>
-          최근 20일(오래된 날 → 최근 날)을 <code>POST /predict</code>에 보내 기준일 다음날의 도착 여객 수를 예측합니다.
-          등급: 34,962명 미만 여유 / 40,177명 초과 혼잡 / 그 사이 보통 (<code>data/README.md</code> 사분위 Q1·Q3).
-        </p>
+        <h2>도착 여객 전망</h2>
+        <p>최근 20일을 바탕으로 예측한 기준일 다음날의 여객 수입니다.</p>
+        <details class="help-details"><summary>혼잡 등급 기준</summary><p>34,962명 미만은 여유, 40,177명 초과는 혼잡, 그 사이는 보통입니다. 아래 기준일과 예측일을 확인하세요.</p></details>
       </div>
       <div class="pipeline-meta">
         <button class="btn secondary" id="forecast-refresh" onclick="loadForecast()">새로고침</button>
@@ -329,41 +335,58 @@
     <div id="forecast-error" class="result-box"></div>
   </div>
 
-  <!-- ================= 데이터 업로드 ================= -->
-  <div class="card">
+  <!-- ================= 현재 모델 버전 (D2) ================= -->
+  <div class="card" id="model-card">
     <div class="section-head">
-      <h2>공항 도착 여객 데이터 업로드</h2>
-      <p>
-        <code>data/uploads/</code>는 여기서 업로드한 CSV만 쌓이는 곳입니다. 학습(<code>train_and_register.py</code> 등)은
-        항상 가장 최근에 올라온 파일을 사용합니다. <code>data/jeju_airport_arrivals.csv</code>를 예시로 올려보세요
-        (컬럼: Date, Arrivals, Departures · 최소 41행 · 단위: 명).
-      </p>
+      <h2>현재 모델 버전</h2>
+      <p>배포 등록 정보와 실제 사용 모델을 확인합니다.</p>
+    </div>
+    <div id="model-status" class="pill neutral" role="status">조회 중…</div>
+    <dl class="model-facts">
+      <div class="fact-wide"><dt>모델을 가져오는 곳</dt><dd id="model-source">-</dd></div>
+      <div class="fact-metric"><dt>배포 등록 버전</dt><dd id="model-version">-</dd></div>
+      <div class="fact-metric"><dt>학습 검증 오차 (RMSE)</dt><dd id="model-rmse">-</dd></div>
+      <div class="fact-wide"><dt>모델 생성 시각</dt><dd id="model-created">-</dd></div>
+      <div class="fact-wide"><dt>서버의 모델 식별 정보</dt><dd id="model-serving">-</dd></div>
+    </dl>
+    <p id="model-alignment" style="color:var(--muted);">실제 서빙 모델과 등록 모델의 일치 여부는 아직 확인되지 않았습니다.</p>
+    <p id="model-change" style="color:var(--muted);" role="status">아직 버전 변화가 관측되지 않았습니다.</p>
+    <button class="btn secondary" id="model-refresh" onclick="loadModelVersion()">버전 새로고침</button>
+  </div>
+
+  <!-- ================= 데이터 업로드 ================= -->
+  <div class="card" id="upload-card">
+    <div class="section-head">
+      <h2>학습 데이터</h2>
+      <p>가장 최근에 업로드한 파일을 예측 입력과 재학습에 사용합니다.</p>
+      <details class="help-details"><summary>파일 형식 및 예시</summary><p>Date, Arrivals, Departures 열 · 최소 41행 · 여객 수 단위는 명입니다. 예시 파일: <code>data/jeju_airport_arrivals.csv</code></p></details>
     </div>
     <div class="upload-row">
-      <input type="file" id="upload-input" accept=".csv" />
+      <input type="file" id="upload-input" aria-label="학습용 CSV 선택" accept=".csv" />
       <button class="btn primary" onclick="uploadFile()">업로드</button>
     </div>
     <div id="upload-status" style="margin-top:10px;"></div>
   </div>
 
   <!-- ================= 드리프트 시뮬레이션 ================= -->
-  <div class="card">
+  <div class="card" id="batch-card">
     <div class="section-head">
-      <h2>드리프트 시뮬레이션</h2>
-      <p>
-        일별 변화율(log return) 기반 랜덤워크로 정상/드리프트 도착 여객 배치를 만들어 <code>/predict/batch-test</code>로 전송합니다.
-        서버가 재학습이 필요하다고 판단하면 재학습 → 배포 기준 확인 → 통과 시 새 모델 반영으로 이어집니다.
-      </p>
+      <h2>배치 시험 &amp; 비교</h2>
+      <p>여러 날의 데이터를 한 번에 보내 예측 결과를 비교합니다. 판정에 따라 자동 재학습과 모델 교체가 진행될 수 있습니다.</p>
     </div>
-    <div class="btn-row">
+    <div class="batch-controls">
+    <div class="control-panel">
+      <h3>시뮬레이션 데이터</h3>
+      <p>가상의 여객 데이터를 만들어 시험합니다. 정상 배치도 현재 모델에 따라 재학습을 유발할 수 있습니다.</p>
+      <div class="btn-row">
       <button class="btn primary" data-batch-action onclick="sendBatch('normal')">정상 배치 전송</button>
       <button class="btn danger" data-batch-action onclick="sendBatch('drift')">드리프트 배치 전송</button>
     </div>
-    <div class="section-head" style="margin-top:20px;">
+    </div>
+    <div class="control-panel section-head">
       <label for="batch-csv-input">시험용 CSV 선택</label>
-      <p id="batch-csv-help">Date, Arrivals, Departures 열이 있는 연속된 날짜의 CSV를 선택하세요.
-        최소 41일(입력 20일 + 비교 21일)이 필요합니다. 도착 여객과 출발 여객을 함께 전송합니다 (위 랜덤 배치는 출발 여객이 없어 서버가 37,000명으로 고정).
-        이 파일은 학습 자료로 저장되지 않습니다. 재학습 시에는 위에서 업로드한 최신 학습 자료를 사용합니다.</p>
+      <p id="batch-csv-help">시험용 CSV는 학습 자료로 저장되지 않습니다. 재학습에는 위에서 업로드한 최신 학습 자료를 사용합니다.</p>
+      <details class="help-details"><summary>시험 파일 조건</summary><p>Date, Arrivals, Departures 열과 연속된 최소 41일(입력 20일 + 비교 21일)이 필요합니다. CSV의 도착·출발 여객을 함께 전송합니다. 랜덤 배치는 출발 여객을 서버에서 37,000명으로 고정합니다.</p></details>
       <div class="upload-row" style="margin-top:10px;">
         <input type="file" id="batch-csv-input" accept=".csv,text/csv" aria-describedby="batch-csv-help batch-csv-summary" onchange="previewCsvBatch()" />
         <button id="batch-csv-send" class="btn primary" data-batch-action onclick="sendCsvBatch()" disabled>CSV 배치 전송</button>
@@ -374,6 +397,7 @@
         <label><input type="radio" name="csv-slot" value="right" /> 오른쪽 칸</label>
       </div>
       <p id="batch-csv-summary" role="status" style="margin-top:10px;">파일을 선택하면 기간과 행 수를 확인할 수 있습니다.</p>
+    </div>
     </div>
     <div id="drift-status" role="status" style="margin-top:14px;"></div>
     <div id="cmp-summary" class="cmp-summary"></div>
@@ -388,11 +412,11 @@
   </div>
 
   <!-- ================= 파이프라인 ================= -->
-  <div class="card">
+  <div class="card" id="pipeline-card">
     <div class="section-head-row">
       <div class="section-head">
-        <h2>드리프트 감지 기반 재학습 파이프라인</h2>
-        <p>위에서 배치를 보내면, 그 요청이 실제로 거쳐간 단계를 아래에 표시합니다 (자동 스케줄러는 없고, 수동 트리거 방식입니다).</p>
+        <h2>재학습 진행 단계</h2>
+        <p>가장 최근에 전송한 배치가 거쳐간 단계입니다. 배치를 보내면 진행 상태가 갱신됩니다.</p>
       </div>
       <div class="pipeline-meta">
         <span class="pill neutral" id="pipeline-run-badge">아직 실행 안 함</span>
@@ -401,35 +425,13 @@
     <div class="pipeline-track" id="pipeline-track"></div>
   </div>
 
-  <!-- ================= 현재 모델 버전 (D2) ================= -->
-  <div class="card">
-    <div class="section-head">
-      <h2>현재 모델 버전</h2>
-      <p>Production은 배포 대상으로 등록된 모델입니다. 아래 값은 마지막 조회 결과이며, 실제 예측에 반영됐는지는 별도 확인이 필요합니다.</p>
-    </div>
-    <div id="model-status" class="pill neutral" role="status">조회 중…</div>
-    <dl style="line-height:1.8; overflow-wrap:anywhere;">
-      <dt>모델을 가져오는 곳</dt><dd id="model-source">-</dd>
-      <dt>배포 대상으로 등록된 버전</dt><dd id="model-version">-</dd>
-      <dt>학습 검증 오차 (RMSE)</dt><dd id="model-rmse">-</dd>
-      <dt>모델 생성 시각</dt><dd id="model-created">-</dd>
-      <dt>서버가 알려 준 모델 이름표</dt><dd id="model-serving">-</dd>
-    </dl>
-    <p id="model-alignment" style="color:var(--muted);">실제 서빙 모델과 등록 모델의 일치 여부는 아직 확인되지 않았습니다.</p>
-    <p id="model-change" style="color:var(--muted);" role="status">아직 버전 변화가 관측되지 않았습니다.</p>
-    <button class="btn secondary" id="model-refresh" onclick="loadModelVersion()">버전 새로고침</button>
-  </div>
-
   <!-- ================= 재학습 로그 ================= -->
-  <div class="card">
+  <div class="card" id="logs-card">
     <div class="section-head-row">
       <div class="section-head">
         <h2>재학습 로그</h2>
-        <p>
-          드리프트 감지·재학습 트리거는 <code>logs/aiops.log</code>에 그대로 기록됩니다.
-          <code>[WARN] drift detected</code> → <code>[INFO] retrain triggered</code> →
-          <code>[OK] new_rmse=... promoted</code> 기록을 확인하세요. 화면이 열려 있는 동안 5초마다 갱신합니다. [WARN]은 주의, [INFO]는 진행, [OK]는 배포 기준 통과를 뜻하며 예측 품질 개선을 보장하지 않습니다.
-        </p>
+        <p>서버가 남긴 원문 기록입니다. 화면을 보는 동안 5초마다 갱신합니다.</p>
+        <details class="help-details"><summary>로그 표시 안내</summary><p>[WARN]은 주의, [INFO]는 진행, [OK]는 배포 기준 통과입니다. 배포 기준 통과가 예측 품질 개선을 보장하지는 않습니다.</p></details>
       </div>
     </div>
     <button class="btn secondary" id="logs-refresh" onclick="loadLogFiles()">로그 새로고침</button>
@@ -438,9 +440,9 @@
     <div id="log-content" class="result-box"></div>
   </div>
 
-</div>
+</main>
 
-<footer>공항 도착 여객 예측 AIOps · 드리프트 감지 → 재학습 파이프라인 (serving_app/static/index.html)</footer>
+<footer>AIRPORT · AIOps &nbsp; / &nbsp; 항공기 도착 여객 예측 운영 대시보드</footer>
 
 <script>
 /* ===================== 전역 상태 ===================== */
@@ -459,8 +461,8 @@ let lastPipelineRun = null; // { driftCheck, clientRmse, ts }
 // 랜덤 정상 → 왼쪽, 랜덤 드리프트 → 오른쪽, CSV → 선택한 칸
 const lastBatchBySlot = { left: null, right: null };
 const SLOT_META = {
-  left: { color: "var(--chart-teal)" },
-  right: { color: "var(--chart-coral)" },
+  left: { color: "var(--chart-blue)", lightColor: "var(--chart-blue-light)" },
+  right: { color: "var(--chart-plum)", lightColor: "var(--chart-plum-light)" },
 };
 
 const NORMAL_SIGMA = 0.012;
@@ -892,10 +894,10 @@ function metricTiles(entry, st) {
     ["판정 bias (서버, 실제−예측)", c.bias != null ? `${fmtSigned(c.bias)}명` : "응답에 없음"],
     ["승격 버전", promoted],
   ];
-  // 앞의 두 개(클라이언트 계산 RMSE·bias)는 큰 타일, 나머지(서버 판정 정보)는 목록
+  // 배치 수치는 위 요약에 한 번만 표시하고 서버 판정은 펼쳐서 확인한다.
   const cell = ([k, v]) => `<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div>`;
-  return `<div class="tiles">${tiles.slice(0, 2).map((t) => `<div class="tile">${cell(t)}</div>`).join("")}</div>
-    <div class="kv-list">${tiles.slice(2).map((t) => `<div class="kv">${cell(t)}</div>`).join("")}</div>`;
+  return `<details class="compare-details"><summary>판정·재학습 상세</summary>
+    <div class="kv-list">${tiles.slice(2).map((t) => `<div class="kv">${cell(t)}</div>`).join("")}</div></details>`;
 }
 /* ---- 인라인 SVG 차트 (라이브러리 없음, 재사용) ---- */
 const CHART_BOX = { w: 440, h: 180, left: 58, right: 10, top: 10, bottom: 24 };
@@ -946,7 +948,7 @@ function svgHoverColumns(n, box, tips, hoverId, markers = []) {
   return tips.map((tip, i) => {
     const cx = box.left + i * xStep(n, box);
     const dots = markers.map((mk) =>
-      `<circle class="hv" cx="${mk.pts[i].x.toFixed(1)}" cy="${mk.pts[i].y.toFixed(1)}" r="4.5" style="fill:var(--panel);stroke:${mk.color};stroke-width:2.5"/>`).join("");
+      `<circle class="hv" cx="${mk.pts[i].x.toFixed(1)}" cy="${mk.pts[i].y.toFixed(1)}" r="4.5" style="fill:var(--panel);stroke:${mk.color};stroke-width:2;vector-effect:non-scaling-stroke"/>`).join("");
     return `<g class="hcol" data-hover="${hoverId}" data-tip="${escapeHtml(tip)}" onmouseenter="chartHover(this)">
       <rect x="${(cx - step / 2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${box.h}" fill="transparent"/>
       <line class="hv" x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${box.top}" y2="${box.h - box.bottom}" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:3 3"/>
@@ -965,23 +967,30 @@ function svgXLabels(n, box) {
 // series: [{ values, color(CSS 변수), dash, area }] - area면 선 아래를 그라디언트로 채운다
 function svgLineChart({ series, extent, tips, hoverId, box = CHART_BOX }) {
   const base = box.h - box.bottom;
+  // 원래 2px 선 아래에만 반투명 블러를 합성해 색 번짐을 추가한다.
+  const glowId = `${hoverId}-glow`;
+  const glow = `<filter id="${glowId}" filterUnits="userSpaceOnUse" x="-12" y="-12" width="${box.w + 24}" height="${box.h + 24}" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="2.2" result="blur"/>
+    <feComponentTransfer in="blur" result="soft-glow"><feFuncA type="linear" slope="0.48"/></feComponentTransfer>
+    <feMerge><feMergeNode in="soft-glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>`;
   const all = series.map((s) => ({ ...s, pts: linePoints(s.values, extent, box) }));
   const defs = all.map((s, i) => s.area ? `<linearGradient id="${hoverId}-g${i}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" style="stop-color:${s.color};stop-opacity:0.28"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>` : "").join("");
+      <stop offset="0" style="stop-color:${s.color};stop-opacity:0.16"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>` : "").join("");
   const areas = all.map((s, i) => {
     if (!s.area || !s.pts.length) return "";
     const first = s.pts[0], last = s.pts[s.pts.length - 1];
     return `<path d="${smoothPath(s.pts)} L${last.x.toFixed(1)},${base} L${first.x.toFixed(1)},${base} Z" style="fill:url(#${hoverId}-g${i})"/>`;
   }).join("");
   const lines = all.map((s) =>
-    `<path d="${smoothPath(s.pts)}" fill="none" style="stroke:${s.color};stroke-width:${s.dash ? 2 : 2.6};stroke-linecap:round;stroke-linejoin:round${s.dash ? ";stroke-dasharray:6 5" : ""}"/>`).join("");
+    `<path d="${smoothPath(s.pts)}" fill="none" filter="url(#${glowId})" style="stroke:${s.color};stroke-width:2;vector-effect:non-scaling-stroke;stroke-linecap:round;stroke-linejoin:round${s.dash ? ";stroke-dasharray:6 5" : ""}"/>`).join("");
   // 마지막 점(가장 최근 날)을 강조
   const ends = all.map((s) => {
     const p = s.pts[s.pts.length - 1];
-    return p ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" style="fill:var(--panel);stroke:${s.color};stroke-width:2.5"/>` : "";
+    return p ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" style="fill:var(--panel);stroke:${s.color};stroke-width:2;vector-effect:non-scaling-stroke"/>` : "";
   }).join("");
   const mid = (box.top + base) / 2;
-  return `<svg viewBox="0 0 ${box.w} ${box.h}" role="img"><defs>${defs}</defs>
+  return `<svg viewBox="0 0 ${box.w} ${box.h}" role="img"><defs>${defs}${glow}</defs>
     ${svgHLine(box.top, box)}${svgHLine(mid, box)}${svgHLine(base, box)}
     ${svgYLabel(box.top, fmtInt(extent[1]), box)}${svgYLabel(base, fmtInt(extent[0]), box)}
     ${svgXLabels(tips.length, box)}
@@ -1024,26 +1033,27 @@ function compareCharts(kind, st, ext) {
   return `
     <div class="chart">
       <div class="chart-title"><b>실제 vs 예측</b> <span class="sub">${st.n}건 · 명 · x축 = n번째</span>
-        <span class="legend"><span class="legend-swatch" style="background:var(--series-actual)"></span>실제 (보낸 값)</span>
-        <span class="legend"><span class="legend-swatch dashed" style="border-color:var(--series-pred)"></span>예측 (응답 predictions)</span>
+        <span class="legend"><span class="legend-swatch" style="background:var(--series-actual)"></span>실제</span>
+        <span class="legend"><span class="legend-swatch dashed" style="border-color:var(--series-pred)"></span>예측</span>
       </div>
       ${svgLineChart({ series: [
         { values: st.actual, color: "var(--series-actual)", area: true },
         { values: st.pred, color: "var(--series-pred)", dash: true },
       ], extent: ext.level, tips, hoverId })}
     </div>
+    <details class="compare-details"><summary>날짜별 오차 보기</summary>
     <div class="chart">
       <div class="chart-title"><b>오차</b> <span class="sub">실제 − 예측 · 명</span>
         <span class="legend"><span class="legend-swatch" style="background:var(--err-over)"></span>+ 실제가 더 큼 (낮게 예측)</span>
         <span class="legend"><span class="legend-swatch" style="background:var(--err-under)"></span>− 실제가 더 작음 (높게 예측)</span>
       </div>
       ${svgErrorBars({ values: st.err, extent: ext.err, tips, hoverId })}
-    </div>
+    </div></details>
     <div class="chart-hover" id="${hoverId}">그래프에 마우스를 올리면 n번째 · 실제 · 예측 · 오차가 보입니다</div>`;
 }
 
 // 요약 가로 막대: 막대는 0에서 값까지. {x, width, y, height}를 돌려준다
-const HBAR_BOX = { w: 440, left: 112, right: 76, top: 22, row: 30, barH: 10 };
+const HBAR_BOX = { w: 440, left: 112, right: 76, top: 22, row: 30, barH: 14 };
 function hbarRects(values, domain, box = HBAR_BOX) {
   const x = scaleLinear(domain, [box.left, box.w - box.right]);
   const x0 = x(Math.max(domain[0], 0));
@@ -1054,10 +1064,13 @@ function hbarRects(values, domain, box = HBAR_BOX) {
 }
 // items: [{ label, value(null이면 미전송), color }], refs: [{ value, label }]
 // 둥근 트랙(전체 범위) 위에 0에서 값까지 둥근 막대, 기준값은 점선
-function svgHBars({ items, domain, refs, fmt, box = HBAR_BOX }) {
+function svgHBars({ items, domain, refs, fmt, gradientId, box = HBAR_BOX }) {
   const x = scaleLinear(domain, [box.left, box.w - box.right]);
   const h = box.top + items.length * box.row + 2;
   const rects = hbarRects(items.map((it) => it.value), domain, box);
+  const gradients = items.map((it, i) => `<linearGradient id="${gradientId}-${i}" x1="${it.value < 0 ? 1 : 0}" y1="0" x2="${it.value < 0 ? 0 : 1}" y2="0">
+    <stop offset="0" style="stop-color:${it.lightColor || it.color}"/><stop offset="1" style="stop-color:${it.color}"/>
+  </linearGradient>`).join("");
   const rows = items.map((it, i) => {
     const r = rects[i];
     const cy = box.top + i * box.row + box.row / 2;
@@ -1067,16 +1080,18 @@ function svgHBars({ items, domain, refs, fmt, box = HBAR_BOX }) {
     const track = `<rect x="${box.left}" y="${ty.toFixed(1)}" width="${box.w - box.left - box.right}" height="${box.barH}" rx="${box.barH / 2}" style="fill:var(--chart-track)"/>`;
     if (!r) return label + track + `<text x="${box.w - box.right + 10}" y="${cy.toFixed(1)}" dominant-baseline="middle" style="fill:var(--faint);font-size:11px">미전송</text>`;
     return label + track
-      + `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${Math.max(1, r.width).toFixed(1)}" height="${r.height}" rx="${(Math.min(r.height, r.width) / 2).toFixed(1)}" style="fill:${it.color}"><title>${escapeHtml(it.label + " " + fmt(it.value))}</title></rect>`
+      + `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${Math.max(1, r.width).toFixed(1)}" height="${r.height}" rx="${(Math.min(r.height, r.width) / 2).toFixed(1)}" style="fill:url(#${gradientId}-${i})"><title>${escapeHtml(it.label + " " + fmt(it.value))}</title></rect>`
       + `<text x="${(box.w - box.right + 10).toFixed(1)}" y="${cy.toFixed(1)}" dominant-baseline="middle" style="fill:var(--text);font-size:12px;font-family:var(--mono);font-weight:700">${escapeHtml(fmt(it.value))}</text>`;
   }).join("");
   const lines = refs.map((ref) => {
     const rx = x(ref.value).toFixed(1);
-    return `<line x1="${rx}" x2="${rx}" y1="${box.top - 2}" y2="${h - 2}" style="stroke:var(--err);stroke-width:1.2;stroke-dasharray:3 3"/>`
-      + `<text x="${rx}" y="${box.top - 7}" text-anchor="middle" style="fill:var(--err);font-size:10px;font-family:var(--mono);font-weight:700">${escapeHtml(ref.label)}</text>`;
+    const anchor = domain[0] < 0 ? (ref.value < 0 ? "end" : "start") : "middle";
+    const dx = domain[0] < 0 ? (ref.value < 0 ? -6 : 6) : 0;
+    return `<line x1="${rx}" x2="${rx}" y1="${box.top - 2}" y2="${h - 2}" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:3 3"/>`
+      + `<text x="${rx}" dx="${dx}" y="${box.top - 7}" text-anchor="${anchor}" style="fill:var(--muted);font-size:10px;font-family:var(--mono);font-weight:700">${escapeHtml(ref.label)}</text>`;
   }).join("");
   const zero = domain[0] < 0 ? `<line x1="${x(0).toFixed(1)}" x2="${x(0).toFixed(1)}" y1="${box.top}" y2="${h - 2}" style="stroke:var(--faint);stroke-width:1"/>` : "";
-  return `<svg viewBox="0 0 ${box.w} ${h}" role="img">${rows}${zero}${lines}</svg>`;
+  return `<svg viewBox="0 0 ${box.w} ${h}" role="img"><defs>${gradients}</defs>${rows}${zero}${lines}</svg>`;
 }
 function summaryDomains(stats) {
   const sent = Object.values(stats).filter(Boolean);
@@ -1091,21 +1106,21 @@ function renderCompareSummary(stats) {
     return;
   }
   const d = summaryDomains(stats);
-  const row = (k, key) => ({ label: lastBatchBySlot[k] ? lastBatchBySlot[k].short : "-", color: SLOT_META[k].color, value: stats[k] ? stats[k][key] : null });
+  const row = (k, key) => ({ label: lastBatchBySlot[k] ? lastBatchBySlot[k].short : "-", color: SLOT_META[k].color, lightColor: SLOT_META[k].lightColor, value: stats[k] ? stats[k][key] : null });
   el.innerHTML = `
     <div class="cmp-summary-grid">
       <div class="summary-panel">
-        <div class="chart-title"><b>배치 RMSE</b> <span class="sub">클라이언트 계산 · 보낸 값 vs 예측</span></div>
+        <div class="chart-title"><b>예측 오차 (RMSE)</b> <span class="sub">작을수록 실제 값에 가까움</span></div>
         ${svgHBars({ items: [row("left", "rmse"), row("right", "rmse")],
-          domain: d.rmse, refs: [{ value: RMSE_THRESHOLD, label: fmtInt(RMSE_THRESHOLD) }], fmt: (v) => `${fmtInt(v)}명` })}
-        <div class="summary-note">점선 = RMSE_THRESHOLD ${fmtInt(RMSE_THRESHOLD)}명 (구조 변화 경고·배포 게이트 기준)</div>
+          gradientId: "cmp-rmse-bar", domain: d.rmse, refs: [{ value: RMSE_THRESHOLD, label: fmtInt(RMSE_THRESHOLD) }], fmt: (v) => `${fmtInt(v)}명` })}
+        <div class="summary-note">참고선 ${fmtInt(RMSE_THRESHOLD)}명 · 전체 배치 오차이며 학습 검증 오차와 다릅니다.</div>
       </div>
       <div class="summary-panel">
-        <div class="chart-title"><b>배치 bias</b> <span class="sub">클라이언트 계산 · 실제 − 예측 평균</span></div>
+        <div class="chart-title"><b>평균 치우침 (bias)</b> <span class="sub">0에 가까울수록 치우침이 적음</span></div>
         ${svgHBars({ items: [row("left", "bias"), row("right", "bias")],
-          domain: d.bias, refs: [{ value: -BIAS_THRESHOLD, label: fmtSigned(-BIAS_THRESHOLD) }, { value: BIAS_THRESHOLD, label: fmtSigned(BIAS_THRESHOLD) }],
+          gradientId: "cmp-bias-bar", domain: d.bias, refs: [{ value: -BIAS_THRESHOLD, label: fmtSigned(-BIAS_THRESHOLD) }, { value: BIAS_THRESHOLD, label: fmtSigned(BIAS_THRESHOLD) }],
           fmt: (v) => `${fmtSigned(v)}명` })}
-        <div class="summary-note">점선 = ±BIAS_THRESHOLD ${fmtInt(BIAS_THRESHOLD)}명 (넘으면 재학습) · 가운데 실선 = 0</div>
+        <div class="summary-note">참고선 ±${fmtInt(BIAS_THRESHOLD)}명 · 실제 재학습 판정은 이상치를 제외한 최근 21건 기준입니다.</div>
       </div>
     </div>`;
 }
@@ -1125,8 +1140,8 @@ function renderCompareColumn(slot, entry, st, ext) {
   if (!entry) return `<div class="cmp-empty">아직 전송 안 함</div>`;
   const ts = new Date(entry.ts * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
   return `<h3><span>${dot}${escapeHtml(entry.source)}</span><span class="ts">${ts} 전송</span></h3>
-    ${metricTiles(entry, st)}
-    ${compareCharts(slot, st, ext)}`;
+    ${compareCharts(slot, st, ext)}
+    ${metricTiles(entry, st)}`;
 }
 function renderCompare() {
   const slots = ["left", "right"];
