@@ -502,6 +502,8 @@ function batchArrivals(kind, n) {
 
 - 2026-10-01 | D2 | PR 준비 중 main `56bf712` 통합. 최신 버전 응답의 오류·실제 등록 번호 연결, 측정값 원문 정밀도와 표 서식 보완 | 화면 대체 응답 53개 통과, compileall 통과. 공통 테스트 4개 통과/2개 실패(위 A/C 요청), 추가 학습 없음. 두 초안 PR로 분리 | feat/d2-dashboard-batch-and-version
 
+- 2026-10-01 | D2 | #16이 CSV 브랜치에 병합된 상태를 main으로 전달하기 위해 최신 main fd760c0 통합. C의 run_id 우선 비교에 맞춰 일치 안내를 특정 번호에 한정하지 않도록 수정 | 백엔드·팀원 변경 보존. PR #16의 검증 기록과 함께 검토 | feat/d2-monitor-main
+
 ## 5. 데이터·상수·통합 — 담당 E
 
 ### 대상 파일

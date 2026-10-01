@@ -357,7 +357,7 @@ async function loadModelVersion() {
     document.getElementById("model-rmse").textContent = Number.isFinite(p?.rmse) ? `${p.rmse.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}명` : "-";
     document.getElementById("model-created").textContent = formatModelTimestamp(p?.created_at);
     document.getElementById("model-serving").textContent = data.serving_registry_version != null ? `v${data.serving_registry_version} (${data.serving_version})` : typeof data.serving_version === "string" ? data.serving_version : "아직 불러온 모델 없음";
-    document.getElementById("model-alignment").textContent = local ? "로컬 모델 사용 중 · 등록 모델과의 비교 대상이 아닙니다." : data.stale === true ? "주의: 실제 서빙 모델과 등록 모델이 다릅니다." : data.stale === false ? "서버 확인: 실제 서빙 모델과 등록 모델의 버전 번호가 일치합니다." : "실제 서빙 모델과 등록 모델의 일치 여부는 아직 확인되지 않았습니다.";
+    document.getElementById("model-alignment").textContent = local ? "로컬 모델 사용 중 · 등록 모델과의 비교 대상이 아닙니다." : data.stale === true ? "주의: 실제 서빙 모델과 등록 모델이 다릅니다." : data.stale === false ? "서버 확인: 실제 서빙 모델과 등록 모델이 서버의 비교 기준에 따라 일치합니다." : "실제 서빙 모델과 등록 모델의 일치 여부는 아직 확인되지 않았습니다.";
     if (previousProduction !== undefined && previousProduction !== version) {
       const name = v => v === null ? "없음" : `v${v}`;
       document.getElementById("model-change").textContent = `최근 관측 변화: ${name(previousProduction)} → ${name(version)} (${new Date().toLocaleTimeString("ko-KR")})`;
