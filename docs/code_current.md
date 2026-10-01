@@ -422,6 +422,8 @@ function batchArrivals(kind, n) {
 - **구성 요소**
   - [D1] 예측 카드 (`#forecast-card`, 업로드 카드 바로 위): 예측값(천 단위 구분, 명), 혼잡 등급 배지(`.pill.ok/.warn/.err` 재사용), 기준일(입력 마지막 날) → 예측일, `model_version`·`model_registry_version`(응답 그대로), `/predict` 왕복 ms(`performance.now()`), 최근 20일 추이(라이브러리 없이 div 막대 20개 + MM-DD 라벨, 마우스 오버 시 날짜·값), 새로고침 버튼. 실패 시 원문은 `.result-box`에 표시. 함수: `loadForecast()`(흐름 전체), `toSequence()`(Number → 정수 변환), `congestionLevel()`(등급), `summarize422()`(422 detail 요약), `renderForecast()`(상태 4종), `renderTrend()`(막대).
   - [D2] 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. **CSV 배치 전송**은 브라우저에서 파일을 검증하고 같은 전송 함수에 `arrivals`를 전달한다. 출발 여객은 서버의 기존 고정값 37,000을 유지하며, CSV 시험 파일은 학습용 업로드를 대체하지 않는다.
+  - [D2] 판정 배지·색상 안내: 정상 초록, 이상치 노랑, 구조적 패턴 변화 보라, 재학습 파랑, 롤백 빨강. D2 전용 선택자로 범위를 제한하고 공통 CSS·파이프라인 단계 색은 유지한다. 재학습의 승격/미승격 결과는 문구로 구분한다.
+  - [D2] 탐지·재학습 이력 표: `aiops.log`를 읽어 탐지 내용·탐지/시작/완료 시각·등록 결과·버전을 최근 기록 순으로 표시한다. 화면 표시 중 5초 주기·수동·배치 종료 후 갱신하며 새로고침 시 로그에서 복원한다. 로그 원문은 아래 카드에서 확인한다.
   - [D2] 재학습 로그 카드: 목록에서 파일 선택(기본 `aiops.log`), 화면 표시 중 5초마다 조회. `[WARN]`/`[WARNING]`/`[ROLLBACK]` 주의, `[INFO]` 진행, `[OK]` 성공, `[ERROR]` 오류 색 구분. 로그 원문은 HTML로 해석하지 않는다.
   - [D2] Production 버전 표기: `GET /monitor/versions` → 등록 버전·학습 검증 RMSE·생성 시각·서버 식별자를 분리 표시. 성공한 조회 간 버전 변화 표시. 실제 서빙 반영이나 예측 품질 개선을 단정하지 않는다. 실제 C 응답의 `created_at` Unix 밀리초를 한국 시간으로 표시한다(ISO 문자열도 호환). `model_source=local`은 Registry 미조회로 표시한다. `registry_error`는 조회 실패로 표시하고 `serving_registry_version`은 실제 서빙 번호로 표시한다. `stale=null`은 일치 미확인으로 유지한다.
   - 데이터 업로드 카드(스켈레톤): `POST /data/upload`.
@@ -442,9 +444,13 @@ function batchArrivals(kind, n) {
 - [D1] 422는 화면 조작으로는 나지 않는다 (항상 정수 20개 전송). 확인하려면 브라우저 콘솔에서 다음 `/predict` 1회만 마지막 날을 빼고 보내는 명령을 쓴다 (코드에 남지 않고, 한 번 쓰면 원래 `fetch`로 돌아간다): `const _f = window.fetch; window.fetch = (u, o) => { if (u === "/predict") { const b = JSON.parse(o.body); b.sequence.pop(); o = { ...o, body: JSON.stringify(b) }; window.fetch = _f; } return _f(u, o); }; loadForecast();`
 - 기존 카드 4개에 D1 예측 카드와 D2 현재 모델 버전 카드가 추가됐다.
 - [D2] CSV 배치 선택·검증·전송 구현: UTF-8(BOM 포함), CRLF, 따옴표, 열 순서 변경 지원. 최소 41일, 날짜 연속성, 필수 열, 0 이상의 정수 확인 후 기간·행 수·예측 비교 일수 표시. 기존 랜덤워크 버튼 유지, 요청 중 중복 전송 방지. Production 버전 화면 구현 완료, 최신 main `56bf712`의 A/B/C/E 코드와 충돌 없이 통합해 실제 `/monitor/versions` 및 로그 조회 연결 완료.
-- [D2] 현재 `batch_test()`는 B가 구현했다. 화면은 `ok`/`anomaly`/`structure_drift`/`retrain_triggered`/`rolled_back`를 구분하며, 알 수 없는 상태를 정상으로 표시하지 않는다. 재학습·승격과 예측 품질 개선은 별도 검증 대상이다. 정상 CSV 서버 시험(`ok`)과 D2 CSV 버튼을 통한 확정 배치(`structure_drift`)를 실제 모델로 확인했다. 승격과 캐시 갱신 후 `/predict`의 실제 등록 번호 1→2도 확인했다. 품질 개선 비교는 미측정.
+- [D2] 현재 `batch_test()`는 B가 구현했다. 화면은 `ok`/`anomaly`/`structure_drift`/`retrain_triggered`/`rolled_back`를 구분하며, 알 수 없는 상태를 정상으로 표시하지 않는다. 재학습·승격과 예측 품질 개선은 별도 검증 대상이다. 정상 CSV 서버 시험(`ok`)과 D2 CSV 버튼을 통한 확정 배치(`structure_drift`)를 실제 모델로 확인했다. 승격과 캐시 갱신 후 `/predict`의 실제 등록 번호 1→2도 확인했다. 품질 개선 비교는 미측정. 이번 제출은 main `fd760c0` 통합 기준이며 C의 모델 비교는 run_id 우선, 없으면 등록 번호를 사용한다.
 
 - [D2] 버전·로그를 화면 표시 중 5초마다 조회하고 수동 새로고침도 지원. 배치 성공·실패 뒤 모두 재조회하며 중복 조회를 막는다. 실패 시 오래된 값을 현재 값으로 표시하지 않으며 조회 요청은 8초에 시간 초과 처리한다. 브라우저에서 v1→v2 관측 변화와 WARN→INFO→OK 로그를 확인했다. 이전 실측은 별도의 `/predict.model_registry_version`으로 반영을 확인했다. 최신 C 코드는 등록 번호를 비교해 `stale`을 반환하며, 모델 로드 전에는 null이다.
+
+- [D2] 판정 5종을 서로 다른 색과 설명 문구로 표시하고 색상 안내를 추가했다. 알 수 없는 판정은 회색이며, 전송 중·통신 오류를 판정 결과로 취급하지 않는다.
+
+- [D2] 탐지·재학습 이력 표 구현. 순차 탐지→시작→성공/롤백 로그를 연결하며, 중첩 실행·빠진 기록은 연결을 추정하지 않는다. 완료 기록 없음은 실행 중/실패를 뜻하지 않는다. 서버 로그에 없는 시간대·입력 파일·실제 서빙 반영은 추정하지 않는다.
 
 ### 측정값
 
@@ -468,6 +474,9 @@ function batchArrivals(kind, n) {
 | [D2] 버전·로그·배치 후 갱신 점검 | 22개 통과, 기존 CSV 23개 재점검 통과 | Node 임시 스크립트 `/tmp/aiops-d2-monitor-check.cjs`, `/tmp/aiops-d2-csv-regression.cjs`. 대체 응답 검증이며 실제 모델 실측 아님 |
 | [D2] 통합 전 브라우저 연동 확인 | 버전 조회 준비 중 / 로그 기록 없음, 수동 새로고침 및 주기 조회 시각 갱신 확인 | 실제 localhost:8000 대시보드. 실제 모델 시험 아님 |
 | [D2] 통합 전 서버 조회 | `/monitor/versions` 404, `/logs/aiops.log` 200 및 빈 content | C 버전 API 미구현, 학습 기록 아직 없음. 2026-10-01 |
+| [D2] 판정 5종 색상 적용 확인 | 서로 다른 5색·설명 문구 확인, 기존 화면 점검 53개 통과 | 실제 브라우저 색상 안내의 계산된 스타일 확인 및 Node 대체 응답 점검. 이번 작업 중 실제 배치·재학습·모델 품질은 미측정 |
+| [D2] 이력 표 검증 | 파싱 점검 11개, 기존 화면 점검 53개 통과; 실제 기존 로그 3건 표시 | `/tmp/d2-history-check.cjs` (합성 로그 및 기존 실측 로그), `/tmp/d2-colors-monitor-check.cjs`, `/tmp/d2-colors-csv-check.cjs`. 실제 브라우저 확인. 새 배치·재학습 미실행 |
+| [D2] 이력 표의 기존 재학습 건 | 탐지 `2026-10-01 15:21:08,247` → 시작 `15:21:08,251` → 완료 `15:21:13,413`, 등록 v2, 로그 RMSE 1338명 | 기존 로그를 읽은 결과. 원래 배치 입력 출처는 미확인. RMSE는 서버 로그의 반올림 표기이며 새 측정/품질 개선 증거가 아님 |
 | [D2] 최신 코드 통합 점검 | 버전·로그 30개 + CSV 23개 통과 | 대체 응답 테스트. 실제 모델 실측은 위 별도 행 |
 | [D2] 최신 서버 상태 | `/health` 200, model_loaded=true, lazy; `/monitor/versions` 200, v2; `/logs/aiops.log` 200 | `MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow .venv/bin/python -m uvicorn serving_app.main:app --host 127.0.0.1 --port 8000` |
 
@@ -487,6 +496,10 @@ function batchArrivals(kind, n) {
 - 2026-10-01 | D2 통합 | 설계 문서는 생성 시각이 문자열이나 실제 C 코드는 Unix 밀리초 숫자 → 날짜가 `-`로 표시될 수 있음 → 두 형식을 한국 시간으로 변환 → 실제 v1/v2 생성 시각 표시 확인.
 - 2026-10-01 | D2 통합 | 파일 선택 자동 조작 중 선택 창 대기 시간 초과와 별도 배치 실행이 관측됨. 어떤 입력/버튼이 원인인지 확인되지 않아 사용자 조작으로 단정하지 않는다. 해당 배치는 RMSE 1729명/bias −1358명 로그, 게이트 1338.3271859414438명으로 v2 승격. 입력 출처 미확인으로 기록하며 고정 CSV 시연 재현 근거로 사용하지 않는다. 이후 정확한 파일 입력 버튼으로 확정 CSV를 선택하고 전송해 `structure_drift`를 확인했다.
 
+- 2026-10-01 | D2 | 이상치·패턴 변화·롤백이 같은 주의 색으로 표시됨 → 공통 warn 클래스를 공유 → D2 판정 배지에만 상태별 색을 적용하고 안내 추가 → 브라우저에서 5색 확인, 설명 문구 유지.
+
+- 2026-10-01 | D2 | 원본 로그를 직접 읽어야 탐지·재학습 시각을 알 수 있음 → 순차 로그를 이력 표로 정리 → 기존 기록 3건과 v2 등록 시각 확인. 시작만 있는 로그·완료만 있는 로그·중첩 실행은 확인 불가로 처리. HTML 문자열은 텍스트로 렌더링.
+
 ### 증빙
 
 | 스냅샷 | 무엇을 보여주나 | 상태 | 파일 | 찍은 사람·시각 |
@@ -496,6 +509,7 @@ function batchArrivals(kind, n) {
 | [D1] 422 실패 카드 | 19개 입력(콘솔 명령) → 422 detail 요약, 다른 카드 정상 | 미촬영 | 제안: `docs/snapshots/d1_03_predict_422.png` | |
 | [D1] 모델 전환 전 카드 | `production` / `model_registry_version` 1, 39,981명 보통, 44 ms | 미촬영 | 제안: `docs/snapshots/d1_04a_version_before.png` | |
 | [D1] 모델 전환 후 카드 | `production` / `model_registry_version` 3, 40,501명 혼잡, 187 ms(새 모델 로드 포함). 사이에 드리프트 배치로 v2(15:29:07, rmse=889 bias=+813 → 재학습 2230), v3(15:29:58, rmse=1619 bias=+739 → 재학습 2269) 승격 (`logs/aiops.log`) | 미촬영 | 제안: `docs/snapshots/d1_04b_version_after.png` | |
+| 판정 5종 색상 안내 | 초록·노랑·보라·파랑·빨강과 설명 문구 | 촬영 | `/tmp/d2-five-status-colors.png` (로컬 증빙, PR 미첨부) | D2, 2026-10-01 |
 | CSV 선택 미리보기 | 파일 기간·행 수·버튼 활성화 | 촬영 | `/tmp/aiops-d2-csv-preview.jpg` (임시 로컬 증빙) | D2, 2026-10-01 |
 | CSV 배치 전송 결과 | 확정 CSV의 실제 `structure_drift` 응답 | 촬영·JSON 저장 | `logs/d2-evidence/d2-confirm-live.jpg`, `logs/d2-evidence/d2-confirm-browser.json` | D2, 2026-10-01 |
 | 재학습 로그 패널 | `[WARN]` → `[INFO]` → `[OK]` 및 구조 변화 알림 | 촬영 | `logs/d2-evidence/d2-logs-live.jpg`, `logs/aiops.log` | D2, 2026-10-01 |
@@ -505,8 +519,9 @@ function batchArrivals(kind, n) {
 ### 다른 영역에 요청
 
 - C: 최신 main에서 `registry_error`, `serving_registry_version`, `stale` 비교 구현 확인. D2 화면에서 조회 실패·등록 모델 없음·서빙 번호를 구분한다.
+- B/C: 정확한 실행별 이력을 위해 요청 식별자·시간대·게이트 미통과·실패 종료 로그가 필요하다. 현재 구현은 순차 로그만 연결하며 완료 로그가 없으면 성공/실패/실행 중을 단정하지 않는다.
 - B: `BatchTestRequest`에 `departures`를 넣을지 결정. 이번 D2 변경은 `arrivals`만 전송한다.
-- A/C: 최신 main 공통 테스트 6개 중 2개 실패: `serving_run_id` 키 누락(`KeyError`)과 run_id 없는 경우 `stale=None` 기대/실제 False의 불일치. 최신 C는 등록 번호 비교 정책이다. 팀 API 계약과 테스트 정합성 확인 요청. D2 범위 밖 코드는 수정하지 않았다.
+- A/C: 최신 main fd760c0 통합 후 공통 테스트 6개 중 5개 통과/1개 실패. `serving_run_id` 누락은 해결됨. run_id 없는 경우 `stale=None`을 기대하는 테스트와 등록 번호로 비교해 False를 반환하는 C 정책의 불일치가 남았다. 팀 API 계약과 테스트 정합성 확인 요청. D2 범위 밖 코드는 수정하지 않았다.
 - E: 최신 main에도 `CLAUDE.md`·`PROJECT_PLAN.md` 일부에 “main은 10 epoch/팀 합의 전”이 남아 있지만 현재 코드는 3 epoch이며 보간 데이터도 병합됐다. `API_SPEC.md`에는 완료 API가 여전히 TODO/설계안이다. 문서 충돌을 알리며 D2에서 정책을 임의 변경하지 않는다. 이번 변경은 판정 기준·공통 상수를 바꾸지 않고 서버 상태를 표시한다. 파이프라인 공통 상수의 `RMSE vs 임계치` 문구도 현행 판정에 맞춘 정리 요청. 상단 `MODEL_SOURCE=mlflow 기준` 문구는 실행 모드와 무관한 고정값이므로 추후 정리 요청(이번 서버는 실제 mlflow 모드). 임시 DB 파일은 최신 main에서 삭제된 것을 확인했다. D1 현황에 남은 recent 미구현 표기도 최신 C 코드와 다름.
 
 - [D1] A: 모델 파일이 없을 때 `/predict`가 사유 없는 텍스트 500(`Internal Server Error`)을 준다. 사유가 담긴 JSON 오류 응답(예: 503 + `{"detail": "모델 파일 없음: serving_app/models/airport_v1.keras"}`) 검토 요청. 카드는 `detail`이 오면 그대로 표시할 수 있다.
@@ -522,12 +537,19 @@ function batchArrivals(kind, n) {
 - 2026-10-01 | D2 | PR 준비 중 main `56bf712` 통합. 최신 버전 응답의 오류·실제 등록 번호 연결, 측정값 원문 정밀도와 표 서식 보완 | 화면 대체 응답 53개 통과, compileall 통과. 공통 테스트 4개 통과/2개 실패(위 A/C 요청), 추가 학습 없음. 두 초안 PR로 분리 | feat/d2-dashboard-batch-and-version
 
 - 2026-10-01 | D2 | #16이 CSV 브랜치에 병합된 상태를 main으로 전달하기 위해 최신 main fd760c0 통합. C의 run_id 우선 비교에 맞춰 일치 안내를 특정 번호에 한정하지 않도록 수정 | 백엔드·팀원 변경 보존. PR #16의 검증 기록과 함께 검토 | feat/d2-monitor-main
+- 2026-10-01 | D2 | 판정 상태 5종 전용 색상과 범례 추가. 서버 정책·공통 CSS 유지 | `node /tmp/d2-colors-monitor-check.cjs` 30개, `node /tmp/d2-colors-csv-check.cjs` 23개 통과. 실제 브라우저 색상 확인. 추가 학습 미실행 | feat/d2-dashboard-batch-and-version (로컬 변경)
+
+- 2026-10-01 | D2 | 로그 기반 탐지·재학습 이력 표 및 자동/수동 갱신 추가 | 이력 점검 11개, 기존 화면 점검 53개 통과. 기존 실측 로그 3건의 브라우저 표시 확인. 새 모델 학습·실제 롤백 미측정 | feat/d2-dashboard-batch-and-version (로컬 변경, PR 미반영)
+
+- 2026-10-01 | D2 | 색상·이력 표 PR 제출 준비. D2 변경 기록 충돌은 양쪽 기록을 모두 보존해 해결 | 이력 11개+기존 화면 53개 통과, compileall 종료 0, 기존 개발 서버 `/health` 200(lazy/false). main fd760c0의 공통 테스트 5개 통과/1개 실패. 새 학습 없음 | feat/d2-status-history
 
 - 2026-10-01 15:08 | youjin09222/D1 | index.html에 내일 도착 여객 예측·혼잡 등급 카드 추가 (상태 4종, 20일 막대, model_version·registry_version, 왕복 ms, FALLBACK_RECENT 분기) | curl `/predict` 20개 200(local 40924.95 v1-local / mlflow 41799.6 production v3), 19개 422 too_short, 경계값 4건 node 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
 - 2026-10-01 15:27 | youjin09222/D1 | main `8f22c4e` 위로 rebase, C의 `recent` 연결 확인 후 `FALLBACK_RECENT`·임시 데이터 배지·`resolveRecent()` 제거, 측정값을 보간 CSV 기준으로 재측정 | `GET /data/status` recent 20행(정수), curl `/predict` 200(local 41304.39 v1-local / mlflow 39980.96 production v1), 19개 422 too_short, node `loadForecast()` 성공·422·원복 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
 - 2026-10-01 15:32 | youjin09222/D1 | 4번 섹션 측정값에 브라우저 카드 ms·예측값 추가, 증빙 [D1] 5행(버전 전환 전·후 분리, 미촬영·파일명 제안), D2·B에 파이프라인 문구 요청 추가 | 브라우저 카드 v1 39,981명 보통 44 ms → v3 40,501명 혼잡 187 ms (새 모델 로드 포함), 이후 새로고침 2회 미측정. 캡처 미촬영. 버전 1→3은 `logs/aiops.log` 15:29:07 v2·15:29:58 v3 승격 | feat/d1-forecast-card
 
 - 2026-10-01 | D2 | main 976b069의 D1 예측 카드와 PR #20 충돌 해결. init에서 D1 예측과 D2 모니터 조회를 모두 시작하며 두 담당자의 상태·측정·변경 기록 보존 | 기존 화면 점검 53개 통과, compileall 통과. `/tmp/d2-init-merge-check.cjs`로 D1 함수·기록 보존 및 예측 대기 중 D2 초기화/주기 조회 진행 확인 | feat/d2-monitor-main
+
+- 2026-10-01 | D2 | PR #20의 main 충돌 해결을 #21에도 반영. D1 증빙 표와 D2 색상 증빙 행 모두 보존 | D1 예측 코드·기록 보존 확인, 기존 D2 64개 점검 및 초기화 연결 점검 통과 | feat/d2-status-history
 
 ## 5. 데이터·상수·통합 — 담당 E
 
