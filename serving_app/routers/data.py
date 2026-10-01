@@ -47,6 +47,19 @@ async def upload(file: UploadFile = File(...)):
     return {"filename": os.path.basename(dest), "rows": len(rows)}
 
 
+def _as_count(value: float) -> int | None:
+    """여객 수를 정수로 바꾼다. 바꿀 수 없으면 None.
+
+    load_rows가 float로 읽어 오는데 CSV에 "nan"이 들어 있으면 float("nan")은 통과하고
+    int(nan)에서 ValueError가 난다. 조회 엔드포인트가 그걸로 500이 되면 대시보드가
+    아예 안 뜨므로, 그 칸만 null로 두고 나머지는 그대로 보여 준다.
+    """
+    try:
+        return int(round(value))
+    except (ValueError, OverflowError, TypeError):
+        return None
+
+
 @router.get("/status")
 def status():
     try:
@@ -63,8 +76,8 @@ def status():
     recent = [
         {
             "date": r["Date"],
-            "arrivals": int(r["Arrivals"]),
-            "departures": int(r["Departures"]),
+            "arrivals": _as_count(r["Arrivals"]),
+            "departures": _as_count(r["Departures"]),
         }
         for r in rows[-SEQ_LEN:]
     ]
