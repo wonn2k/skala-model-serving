@@ -3,21 +3,23 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AIOps · 공항 도착 여객 예측 재학습 파이프라인</title>
+<title>항공기 도착 여객 예측 AIOps (운영 대시보드)</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <style>
   :root {
-    /* 라이트 테마. 글자 대비(흰 배경 기준): text 16.2:1, muted 6.6:1, faint 4.8:1, accent 6.5:1 */
-    --bg: #f5f6f8;
+    /* Blue operations theme: colour tokens shared by cards, charts and statuses. */
+    --bg: #f4f6fa;
     --panel: #ffffff;
-    --panel-2: #f1f3f6;
+    --panel-2: #f5f7fb;
     --border: #d9dee6;
-    --text: #1b2030;
-    --muted: #545d6e;
-    --faint: #6b7385;
-    --accent: #3451d1;
-    --accent-2: #7b93ec;
-    --accent-soft: rgba(52, 81, 209, 0.10);
+    --text: #172338;
+    --muted: #526078;
+    --faint: #62718a;
+    --accent: #1760db;
+    --accent-2: #246ce0;
+    --accent-soft: #edf4ff;
+    --accent-hover: #124db4;
+    --structure: #7443b7;
     --on-accent: #ffffff;
     --ok: #17703f;
     --ok-soft: rgba(23, 112, 63, 0.10);
@@ -27,40 +29,42 @@
     --err-soft: rgba(198, 40, 40, 0.10);
     --on-danger: #ffffff;
     --border-soft: #eceef3;
-    --shadow: 0 1px 2px rgba(27, 32, 48, 0.04), 0 8px 24px rgba(27, 32, 48, 0.06);
-    /* 차트 색 (흰 배경 그래픽 대비: coral 3.5:1, indigo 4.9:1, teal 4.6:1) */
-    --chart-coral: #d9673f;
-    --chart-indigo: #5566d8;
-    --chart-teal: #2a8378;
+    --shadow: 0 4px 24px rgba(24, 52, 96, 0.025);
+    /* Chart colours retain separate actual/predicted series and error directions. */
+    --chart-blue: #1760db;
+    --chart-blue-light: #79aaff;
+    --chart-indigo: #1760db;
+    --chart-plum: #b44782;
+    --chart-plum-light: #e6a4cd;
     --chart-grid: #e6e9ef;
     --chart-track: #f0f2f7;
-    --series-actual: var(--chart-coral);
-    --series-pred: var(--chart-indigo);
-    --err-over: var(--chart-coral);   /* 실제 − 예측 > 0 (모델이 낮게 예측) */
-    --err-under: var(--chart-indigo); /* 실제 − 예측 < 0 (모델이 높게 예측) */
+    --series-actual: var(--chart-blue);
+    --series-pred: var(--chart-plum);
+    --err-over: var(--chart-blue);   /* 실제 − 예측 > 0 (모델이 낮게 예측) */
+    --err-under: var(--chart-plum); /* 실제 − 예측 < 0 (모델이 높게 예측) */
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
 
   .topnav {
     display: flex; align-items: center; gap: 14px; justify-content: space-between;
-    background: var(--panel); border-bottom: 1px solid var(--border);
-    padding: 0 20px; height: 60px; position: sticky; top: 0; z-index: 10;
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: 24px;
+    max-width: 1376px; margin: 24px auto 0; padding: 18px 24px; min-height: 80px;
   }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand-mark {
-    width: 34px; height: 34px; border-radius: 9px;
+    width: 42px; height: 42px; border-radius: 14px;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     display: flex; align-items: center; justify-content: center; color: var(--on-accent);
     flex-shrink: 0;
   }
   .brand-text .title { font-weight: 700; font-size: 1.02rem; line-height: 1.2; }
-  .brand-text .subtitle { font-size: 0.72rem; color: var(--muted); }
+  .brand-text .subtitle { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
   .nav-right { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; color: var(--muted); }
   .pill {
-    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
     font-size: 0.74rem; font-weight: 700;
   }
   .pill.ok { background: var(--ok-soft); color: var(--ok); }
@@ -69,57 +73,57 @@
   .pill.neutral { background: var(--panel-2); color: var(--muted); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-  .page { max-width: 980px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .page { max-width: 1440px; margin: 0 auto; padding: 32px; display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr); gap: 24px; }
 
   .card {
-    background: var(--panel); border: 1px solid var(--border-soft); border-radius: 18px;
-    padding: 20px 22px; box-shadow: var(--shadow);
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: 24px;
+    padding: 28px; box-shadow: var(--shadow); min-width: 0; grid-column: 1 / -1;
   }
-  .section-head { margin-bottom: 14px; }
-  .section-head h2 { margin: 0 0 3px; font-size: 1.05rem; }
-  .section-head p { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+  .section-head { margin-bottom: 20px; }
+  .section-head h2 { margin: 0 0 8px; font-size: 1.12rem; font-weight: 700; letter-spacing: -0.035em; }
+  .section-head p { margin: 0; color: var(--muted); font-size: 0.875rem; line-height: 1.7; }
   .section-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
-  .btn { border: none; border-radius: 9px; padding: 9px 14px; font-size: 0.83rem; font-weight: 700; cursor: pointer; }
+  .btn { border: 1px solid transparent; border-radius: 12px; min-height: 44px; padding: 10px 18px; font: 600 0.875rem var(--sans); cursor: pointer; transition: background 180ms, box-shadow 180ms; }
   .btn.primary { background: var(--accent); color: var(--on-accent); }
   .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
-  .btn.danger { background: var(--err); color: var(--on-danger); }
+  .btn.danger { background: var(--err-soft); color: var(--err); border-color: var(--err-soft); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .btn-row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
 
   /* ---------- Forecast (D1) ---------- */
   .fc-main { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  .fc-value { font-size: 2rem; font-weight: 800; font-family: var(--mono); }
+  .fc-value { font-size: clamp(2.2rem, 3.5vw, 3.2rem); font-weight: 700; font-family: var(--sans); letter-spacing: -0.045em; font-variant-numeric: tabular-nums; }
   .fc-unit { font-size: 1rem; color: var(--muted); font-weight: 600; }
   .fc-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .fc-trend { margin-top: 16px; }
   .fc-trend-title { font-size: 0.74rem; color: var(--muted); margin-bottom: 6px; }
-  .fc-bars { display: flex; align-items: flex-end; gap: 5px; height: 110px; }
+  .fc-bars { display: flex; align-items: flex-end; gap: 6px; height: 132px; }
   .fc-bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; min-width: 0; }
   .fc-bar { background: var(--chart-indigo); border-radius: 6px; min-height: 4px; opacity: 0.35; transition: opacity 0.15s; }
   .fc-bar-col:hover .fc-bar { opacity: 0.85; }
-  .fc-bar-col:last-child .fc-bar { background: var(--chart-coral); opacity: 1; }
+  .fc-bar-col:last-child .fc-bar { background: var(--accent); opacity: 1; }
   .fc-labels { display: flex; gap: 5px; margin-top: 4px; }
-  .fc-label { flex: 1; min-width: 0; text-align: center; font-size: 0.6rem; color: var(--faint); font-family: var(--mono); overflow: hidden; white-space: nowrap; }
+  .fc-label { flex: 1; min-width: 0; text-align: center; font-size: 0.75rem; color: var(--faint); font-family: var(--mono); overflow: hidden; white-space: nowrap; }
   .fc-hover { font-size: 0.74rem; color: var(--muted); margin-top: 6px; min-height: 1.1em; font-variant-numeric: tabular-nums; }
 
   /* ---------- Drift compare (정상 vs 드리프트) ---------- */
-  .cmp-summary { margin-top: 16px; }
-  .cmp-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .summary-panel { background: var(--panel-2); border-radius: 14px; padding: 4px 14px 10px; min-width: 0; }
+  .cmp-summary { margin-top: 24px; }
+  .cmp-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .summary-panel { background: var(--panel-2); border-radius: 18px; padding: 8px 20px 16px; min-width: 0; }
   .summary-panel svg { width: 100%; height: auto; display: block; }
   .summary-note { font-size: 0.68rem; color: var(--faint); margin-top: 2px; }
-  .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+  .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
   @media (max-width: 720px) { .cmp-grid, .cmp-summary-grid { grid-template-columns: 1fr; } }
-  .cmp-col { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 16px; padding: 14px 16px; min-width: 0; box-shadow: var(--shadow); }
+  .cmp-col { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 20px; padding: 24px; min-width: 0; }
   .cmp-col h3 { margin: 0 0 10px; font-size: 0.95rem; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
   .cmp-col h3 .kind-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
   .cmp-col h3 .ts { font-size: 0.72rem; color: var(--faint); font-weight: 500; }
-  .cmp-empty { color: var(--faint); font-size: 0.82rem; padding: 28px 4px; text-align: center; }
+  .cmp-empty { color: var(--faint); font-size: 0.875rem; padding: 40px 16px; text-align: center; }
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .tile { background: var(--panel-2); border-radius: 12px; padding: 10px 12px; min-width: 0; }
-  .tile .k { font-size: 0.68rem; color: var(--muted); line-height: 1.3; }
-  .tile .v { font-family: var(--mono); font-weight: 800; font-size: 1.35rem; margin-top: 4px; color: var(--text); letter-spacing: -0.01em; }
+  .tile { background: var(--panel-2); border-radius: 14px; padding: 16px; min-width: 0; }
+  .tile .k { font-size: 0.75rem; color: var(--muted); line-height: 1.3; }
+  .tile .v { font-family: var(--sans); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.35rem; margin-top: 4px; color: var(--text); letter-spacing: -0.01em; }
   .kv-list { margin-top: 8px; }
   .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--border-soft); }
   .kv:last-child { border-bottom: none; }
@@ -139,7 +143,7 @@
   .cmp-col h3 .ts { flex-shrink: 0; }
   .slot-choice { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 0.82rem; color: var(--muted); }
   .slot-choice label { display: inline-flex; gap: 5px; align-items: center; color: var(--text); cursor: pointer; }
-  .raw-json { margin-top: 12px; }
+  .raw-json { margin-top: 20px; }
   .raw-json summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); }
 
   /* ---------- Upload ---------- */
@@ -151,12 +155,12 @@
   /* ---------- Pipeline ---------- */
   .pipeline-meta { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; color: var(--muted); }
   .pipeline-track { display: flex; align-items: stretch; overflow-x: auto; padding: 2px 2px 4px; gap: 0; }
-  .pipe-stage { flex: 1; min-width: 110px; text-align: center; padding: 10px 10px; border-left: 1px solid var(--border); }
+  .pipe-stage { flex: 1; min-width: 130px; text-align: center; padding: 20px 12px; border-left: 1px solid var(--border); }
   .pipe-stage:first-child { border-left: none; }
   .pipe-title { font-size: 0.82rem; font-weight: 700; color: var(--faint); }
   .pipe-stage.ok .pipe-title, .pipe-stage.warn .pipe-title { color: var(--text); }
-  .pipe-desc { font-size: 0.7rem; color: var(--muted); margin: 2px 0 6px; line-height: 1.4; }
-  .pipe-status { font-size: 0.7rem; font-weight: 700; }
+  .pipe-desc { font-size: 0.75rem; color: var(--muted); margin: 2px 0 6px; line-height: 1.4; }
+  .pipe-status { font-size: 0.75rem; font-weight: 700; }
   .pipe-stage.ok .pipe-status { color: var(--ok); }
   .pipe-stage.warn .pipe-status { color: var(--warn); }
   .pipe-stage.idle .pipe-status { color: var(--faint); }
@@ -164,8 +168,8 @@
   /* ---------- Tables ---------- */
   table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
   th { text-align: left; color: var(--muted); font-weight: 600; font-size: 0.74rem; text-transform: uppercase;
-       letter-spacing: 0.03em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-  td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+       letter-spacing: 0.03em; padding: 14px 16px; border-bottom: 1px solid var(--border-soft); }
+  td { padding: 16px; border-bottom: 1px solid var(--border-soft); }
   tr:last-child td { border-bottom: none; }
   .table-empty { color: var(--faint); font-size: 0.82rem; padding: 20px 4px; text-align: center; }
 
@@ -177,7 +181,119 @@
   .result-box.show { display: block; }
 
   code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
-  footer { color: var(--faint); font-size: 0.76rem; text-align: center; margin: 26px 0 10px; }
+  footer { color: var(--faint); font-size: 0.75rem; text-align: center; padding: 8px 24px 32px; }
+
+  /* Layout refresh (D2): shared visual styling, existing behaviour preserved. */
+  html { scroll-padding-top: 24px; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+  .skip-link { position: absolute; top: -100px; left: 24px; background: var(--panel); padding: 12px 20px; z-index: 20; }
+  .skip-link:focus { top: 12px; }
+  .nav-links { display: flex; gap: 4px; background: var(--panel-2); border-radius: 999px; padding: 4px; }
+  .nav-links a { color: var(--muted); text-decoration: none; padding: 9px 18px; border-radius: 999px; font-size: 0.875rem; font-weight: 600; }
+  .nav-links a:hover, .nav-links a:focus-visible { background: var(--accent-soft); color: var(--accent); }
+  .page-heading { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 8px 0 4px; }
+  .eyebrow { color: var(--accent); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.16em; margin-bottom: 6px; }
+  h1 { margin: 0; font-size: clamp(1.65rem, 3vw, 2rem); letter-spacing: -0.045em; font-weight: 650; }
+  .page-heading p { margin: 6px 0 0; color: var(--muted); font-size: 0.9rem; }
+  .page-heading > span { border: 1px solid var(--border); padding: 8px 14px; border-radius: 999px; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+  #forecast-card, #model-card { grid-column: auto; }
+  #forecast-card > .section-head-row { flex-wrap: nowrap; }
+  #forecast-refresh { white-space: nowrap; }
+  #forecast-body { display: grid; grid-template-columns: minmax(190px, 0.8fr) minmax(0, 1.2fr); gap: 20px; }
+  .fc-main { grid-column: 1; grid-row: 1; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: var(--on-accent); border-radius: 20px; padding: 24px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 10px; }
+  .fc-main::before { content: '다음날 도착 여객'; font-size: 0.875rem; }
+  .fc-main .fc-unit { color: var(--on-accent); font-weight: 400; }
+  .fc-main .pill { background: var(--panel); }
+  .fc-trend { grid-column: 2; grid-row: 1; margin: 0; align-self: center; min-width: 0; }
+  .fc-trend-title { font-size: 0.75rem; line-height: 1.6; margin-bottom: 14px; }
+  .fc-label { overflow: visible; }
+  .fc-label:not(:first-child):not(:last-child):not(:nth-child(5n)) { visibility: hidden; }
+  .fc-meta { grid-column: 1 / -1; margin: 0; gap: 8px; }
+  .fc-meta .pill { font-weight: 500; font-size: 0.75rem; overflow-wrap: anywhere; }
+  .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn.secondary:hover:not(:disabled), input::file-selector-button:hover { background: var(--accent-soft); color: var(--accent); }
+  .btn.danger:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--err); }
+  .help-details { margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
+  summary { cursor: pointer; padding: 6px 0; }
+  .help-details[open] summary { margin-bottom: 6px; }
+  .help-details p { max-width: 88ch; }
+  #upload-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 32px; align-items: center; }
+  #upload-card .section-head { margin: 0; }
+  #upload-status:empty { display: none; }
+  #upload-status { grid-column: 1 / -1; }
+  input[type="file"] { width: 280px; min-width: 0; font-family: var(--sans); padding: 4px; }
+  input::file-selector-button { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; min-height: 44px; padding: 10px 14px; margin-right: 12px; color: var(--text); font: inherit; cursor: pointer; }
+  .batch-controls { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 24px; }
+  .control-panel { background: var(--panel-2); border-radius: 18px; padding: 24px; margin: 0; min-width: 0; }
+  .control-panel h3, .control-panel > label { display: block; margin: 0 0 8px; font-size: 0.95rem; font-weight: 650; }
+  .control-panel p { color: var(--muted); font-size: 0.825rem; margin: 0; line-height: 1.7; }
+  .control-panel .btn-row, .control-panel .upload-row { margin-top: 20px; }
+  .slot-choice { margin-top: 16px; gap: 8px; }
+  .slot-choice label { min-height: 44px; background: var(--panel); padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); }
+  input[type="radio"] { accent-color: var(--accent); }
+  .slot-choice label:has(input:checked) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  #drift-legend { margin-top: 24px; gap: 8px; }
+  #drift-status { display: flex; flex-wrap: wrap; gap: 8px; }
+  #model-card .section-head { margin-bottom: 12px; }
+  .model-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+  .model-facts > div { min-width: 0; }
+  .model-facts .fact-wide { grid-column: 1 / -1; display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+  .model-facts dt { font-size: 0.75rem; color: var(--muted); margin-bottom: 5px; }
+  .model-facts dd { margin: 0; font-size: 0.825rem; overflow-wrap: anywhere; }
+  .model-facts .fact-metric { background: var(--panel-2); padding: 14px; border-radius: 14px; }
+  .fact-metric dd { font-size: 1.65rem; font-weight: 650; color: var(--accent); font-variant-numeric: tabular-nums; letter-spacing: -0.035em; }
+  #model-alignment, #model-change { margin: 8px 0; }
+  #model-refresh { margin-top: 8px; }
+  #model-alignment, #model-change, #history-status, #log-status { font-size: 0.8rem; line-height: 1.65; }
+  #history-card [role="region"] { max-height: 420px; border: 1px solid var(--border-soft); border-radius: 16px; }
+  #history-card caption { padding: 14px 16px !important; font-size: 0.75rem; }
+  th { background: var(--panel-2); position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+  tbody tr:hover { background: var(--panel-2); }
+  #log-file-list .btn { overflow-wrap: anywhere; text-align: left; }
+  #log-content { line-height: 1.8; padding: 20px; border-radius: 16px; }
+  @media (max-width: 1100px) {
+    .topnav { margin: 16px 24px 0; }
+    .nav-right { display: none; }
+    .page { padding: 24px; grid-template-columns: minmax(0, 1fr); }
+    #upload-card { grid-template-columns: minmax(0, 1fr); }
+    .model-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .model-facts .fact-wide { grid-column: auto; display: block; }
+    .model-facts > div:first-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 720px) {
+    .topnav { margin: 12px 16px 0; padding: 16px; flex-wrap: wrap; gap: 16px; border-radius: 20px; }
+    .nav-links { width: 100%; justify-content: space-between; }
+    .nav-links a { flex: 1; text-align: center; padding: 8px; }
+    .page { padding: 24px 16px; gap: 20px; }
+    .page-heading { padding: 0; }
+    .page-heading > span { display: none; }
+    .card { padding: 22px; border-radius: 20px; }
+    .batch-controls, #forecast-body { grid-template-columns: minmax(0, 1fr); }
+    .fc-main { grid-column: auto; grid-row: auto; }
+    .fc-trend { grid-column: 1; grid-row: 2; }
+    .fc-meta { grid-row: 3; }
+    .fc-value { font-size: 2.6rem; }
+    .fact-metric dd { font-size: clamp(1.1rem, 4vw, 1.65rem); }
+    .fc-bars { height: 130px; }
+    .control-panel, .cmp-col { padding: 18px; }
+    .model-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .model-facts .fact-wide { grid-column: 1 / -1; }
+    .upload-row { align-items: stretch; }
+    input[type="file"] { width: 100%; }
+    .upload-row > .btn { width: 100%; }
+    .cmp-col h3 { flex-wrap: wrap; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+
+  /* Comparison: blue/plum chart hierarchy, secondary diagnostics collapsed. */
+  .compare-details { margin-top: 16px; border-top: 1px solid var(--border-soft); padding-top: 8px; }
+  .compare-details > summary { color: var(--muted); font-size: 0.825rem; min-height: 44px; display: list-item; padding: 10px 0; }
+  .cmp-col > .chart { margin-top: 24px; }
+  .cmp-col > .chart .chart-title { margin-bottom: 20px; }
+  .cmp-col .chart-title .legend { font-size: 0.8rem; }
+  .cmp-col .chart-hover { font-size: 0.75rem; line-height: 1.6; }
+  .summary-panel { background: var(--panel); border: 1px solid var(--border-soft); padding: 12px 20px 18px; }
+  .summary-note { font-size: 0.75rem; line-height: 1.6; margin-top: 8px; }
 </style>
 <!-- D2 판정 배지 전용: 공통 CSS·파이프라인 단계 색상과 분리 -->
 <style>
@@ -188,12 +304,13 @@
   }
   :is(#drift-status, #drift-legend) [data-drift-state="ok"] { --d2-status-color: var(--ok); }
   :is(#drift-status, #drift-legend) [data-drift-state="anomaly"] { --d2-status-color: var(--warn); }
-  :is(#drift-status, #drift-legend) [data-drift-state="structure_drift"] { --d2-status-color: #c4a5ff; }
+  :is(#drift-status, #drift-legend) [data-drift-state="structure_drift"] { --d2-status-color: var(--structure); }
   :is(#drift-status, #drift-legend) [data-drift-state="retrain_triggered"] { --d2-status-color: var(--accent); }
   :is(#drift-status, #drift-legend) [data-drift-state="rolled_back"] { --d2-status-color: var(--err); }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#overview">본문으로 건너뛰기</a>
 
 <div class="topnav">
   <div class="brand">
@@ -201,26 +318,31 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-10 2 3h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <div class="brand-text">
-      <div class="title">AIOps · 공항 도착 여객 예측</div>
-      <div class="subtitle">드리프트 감지 기반 재학습 파이프라인</div>
+      <div class="title">AIRPORT <span style="color:var(--accent)">/</span> AIOps</div>
+      <div class="subtitle">항공기 도착 여객 예측 · 운영 모니터링</div>
     </div>
   </div>
+  <nav class="nav-links" aria-label="대시보드 구역">
+    <a href="#overview">운영 개요</a><a href="#batch-card">배치 시험</a><a href="#history-card">재학습 이력</a>
+  </nav>
   <div class="nav-right">
-    <span class="pill neutral">MODEL_SOURCE=mlflow 기준</span>
+    <span class="pill neutral">운영자 대시보드</span>
   </div>
 </div>
 
-<div class="page">
+<main class="page" id="overview">
+  <div class="page-heading">
+    <div><div class="eyebrow">AIRPORT OPERATIONS</div><h1>항공기 도착 여객 예측 AIOps (운영 대시보드)</h1><p>여객 수 전망부터 모델의 변화까지, 한눈에 확인하세요.</p></div>
+    <span>예측 · 모니터링 · 재학습</span>
+  </div>
 
   <!-- ================= 내일 도착 여객 예측 (D1) ================= -->
   <div class="card" id="forecast-card">
     <div class="section-head-row">
       <div class="section-head">
-        <h2>내일 도착 여객 예측 · 혼잡 등급</h2>
-        <p>
-          최근 20일(오래된 날 → 최근 날)을 <code>POST /predict</code>에 보내 기준일 다음날의 도착 여객 수를 예측합니다.
-          등급: 34,962명 미만 여유 / 40,177명 초과 혼잡 / 그 사이 보통 (<code>data/README.md</code> 사분위 Q1·Q3).
-        </p>
+        <h2>도착 여객 전망</h2>
+        <p>최근 20일을 바탕으로 예측한 기준일 다음날의 여객 수입니다.</p>
+        <details class="help-details"><summary>혼잡 등급 기준</summary><p>34,962명 미만은 여유, 40,177명 초과는 혼잡, 그 사이는 보통입니다. 아래 기준일과 예측일을 확인하세요.</p></details>
       </div>
       <div class="pipeline-meta">
         <button class="btn secondary" id="forecast-refresh" onclick="loadForecast()">새로고침</button>
@@ -230,41 +352,58 @@
     <div id="forecast-error" class="result-box"></div>
   </div>
 
-  <!-- ================= 데이터 업로드 ================= -->
-  <div class="card">
+  <!-- ================= 현재 모델 버전 (D2) ================= -->
+  <div class="card" id="model-card">
     <div class="section-head">
-      <h2>공항 도착 여객 데이터 업로드</h2>
-      <p>
-        <code>data/uploads/</code>는 여기서 업로드한 CSV만 쌓이는 곳입니다. 학습(<code>train_and_register.py</code> 등)은
-        항상 가장 최근에 올라온 파일을 사용합니다. <code>data/jeju_airport_arrivals.csv</code>를 예시로 올려보세요
-        (컬럼: Date, Arrivals, Departures · 최소 41행 · 단위: 명).
-      </p>
+      <h2>현재 모델 버전</h2>
+      <p>배포 등록 정보와 실제 사용 모델을 확인합니다.</p>
+    </div>
+    <div id="model-status" class="pill neutral" role="status">조회 중…</div>
+    <dl class="model-facts">
+      <div class="fact-wide"><dt>모델을 가져오는 곳</dt><dd id="model-source">-</dd></div>
+      <div class="fact-metric"><dt>배포 등록 버전</dt><dd id="model-version">-</dd></div>
+      <div class="fact-metric"><dt>학습 검증 오차 (RMSE)</dt><dd id="model-rmse">-</dd></div>
+      <div class="fact-wide"><dt>모델 생성 시각</dt><dd id="model-created">-</dd></div>
+      <div class="fact-wide"><dt>서버의 모델 식별 정보</dt><dd id="model-serving">-</dd></div>
+    </dl>
+    <p id="model-alignment" style="color:var(--muted);">실제 서빙 모델과 등록 모델의 일치 여부는 아직 확인되지 않았습니다.</p>
+    <p id="model-change" style="color:var(--muted);" role="status">아직 버전 변화가 관측되지 않았습니다.</p>
+    <button class="btn secondary" id="model-refresh" onclick="loadModelVersion()">버전 새로고침</button>
+  </div>
+
+  <!-- ================= 데이터 업로드 ================= -->
+  <div class="card" id="upload-card">
+    <div class="section-head">
+      <h2>학습 데이터</h2>
+      <p>가장 최근에 업로드한 파일을 예측 입력과 재학습에 사용합니다.</p>
+      <details class="help-details"><summary>파일 형식 및 예시</summary><p>Date, Arrivals, Departures 열 · 최소 41행 · 여객 수 단위는 명입니다. 예시 파일: <code>data/jeju_airport_arrivals.csv</code></p></details>
     </div>
     <div class="upload-row">
-      <input type="file" id="upload-input" accept=".csv" />
+      <input type="file" id="upload-input" aria-label="학습용 CSV 선택" accept=".csv" />
       <button class="btn primary" onclick="uploadFile()">업로드</button>
     </div>
     <div id="upload-status" style="margin-top:10px;"></div>
   </div>
 
   <!-- ================= 드리프트 시뮬레이션 ================= -->
-  <div class="card">
+  <div class="card" id="batch-card">
     <div class="section-head">
-      <h2>드리프트 시뮬레이션</h2>
-      <p>
-        일별 변화율(log return) 기반 랜덤워크로 정상/드리프트 도착 여객 배치를 만들어 <code>/predict/batch-test</code>로 전송합니다.
-        서버가 재학습이 필요하다고 판단하면 재학습 → 배포 기준 확인 → 통과 시 새 모델 반영으로 이어집니다.
-      </p>
+      <h2>배치 시험 &amp; 비교</h2>
+      <p>여러 날의 데이터를 한 번에 보내 예측 결과를 비교합니다. 판정에 따라 자동 재학습과 모델 교체가 진행될 수 있습니다.</p>
     </div>
-    <div class="btn-row">
+    <div class="batch-controls">
+    <div class="control-panel">
+      <h3>시뮬레이션 데이터</h3>
+      <p>가상의 여객 데이터를 만들어 시험합니다. 정상 배치도 현재 모델에 따라 재학습을 유발할 수 있습니다.</p>
+      <div class="btn-row">
       <button class="btn primary" data-batch-action onclick="sendBatch('normal')">정상 배치 전송</button>
       <button class="btn danger" data-batch-action onclick="sendBatch('drift')">드리프트 배치 전송</button>
     </div>
-    <div class="section-head" style="margin-top:20px;">
+    </div>
+    <div class="control-panel section-head">
       <label for="batch-csv-input">시험용 CSV 선택</label>
-      <p id="batch-csv-help">Date, Arrivals, Departures 열이 있는 연속된 날짜의 CSV를 선택하세요.
-        최소 41일(입력 20일 + 비교 21일)이 필요합니다. 도착 여객만 전송하며, 출발 여객은 현재 서버에서 37,000명으로 고정합니다.
-        이 파일은 학습 자료로 저장되지 않습니다. 재학습 시에는 위에서 업로드한 최신 학습 자료를 사용합니다.</p>
+      <p id="batch-csv-help">시험용 CSV는 학습 자료로 저장되지 않습니다. 재학습에는 위에서 업로드한 최신 학습 자료를 사용합니다.</p>
+      <details class="help-details"><summary>시험 파일 조건</summary><p>Date, Arrivals, Departures 열과 연속된 최소 41일(입력 20일 + 비교 21일)이 필요합니다. 도착 여객만 전송하며, 출발 여객은 서버에서 37,000명으로 고정합니다.</p></details>
       <div class="upload-row" style="margin-top:10px;">
         <input type="file" id="batch-csv-input" accept=".csv,text/csv" aria-describedby="batch-csv-help batch-csv-summary" onchange="previewCsvBatch()" />
         <button id="batch-csv-send" class="btn primary" data-batch-action onclick="sendCsvBatch()" disabled>CSV 배치 전송</button>
@@ -275,6 +414,7 @@
         <label><input type="radio" name="csv-slot" value="right" /> 오른쪽 칸</label>
       </div>
       <p id="batch-csv-summary" role="status" style="margin-top:10px;">파일을 선택하면 기간과 행 수를 확인할 수 있습니다.</p>
+    </div>
     </div>
     <div id="drift-legend" class="btn-row" role="group" aria-label="판정 상태 색상 안내">
       <span class="pill" data-drift-state="ok"><span class="dot" aria-hidden="true"></span>정상</span>
@@ -296,11 +436,11 @@
   </div>
 
   <!-- ================= 파이프라인 ================= -->
-  <div class="card">
+  <div class="card" id="pipeline-card">
     <div class="section-head-row">
       <div class="section-head">
-        <h2>드리프트 감지 기반 재학습 파이프라인</h2>
-        <p>위에서 배치를 보내면, 그 요청이 실제로 거쳐간 단계를 아래에 표시합니다 (자동 스케줄러는 없고, 수동 트리거 방식입니다).</p>
+        <h2>재학습 진행 단계</h2>
+        <p>가장 최근에 전송한 배치가 거쳐간 단계입니다. 배치를 보내면 진행 상태가 갱신됩니다.</p>
       </div>
       <div class="pipeline-meta">
         <span class="pill neutral" id="pipeline-run-badge">아직 실행 안 함</span>
@@ -309,31 +449,12 @@
     <div class="pipeline-track" id="pipeline-track"></div>
   </div>
 
-  <!-- ================= 현재 모델 버전 (D2) ================= -->
-  <div class="card">
-    <div class="section-head">
-      <h2>현재 모델 버전</h2>
-      <p>Production은 배포 대상으로 등록된 모델입니다. 아래 값은 마지막 조회 결과이며, 실제 예측에 반영됐는지는 별도 확인이 필요합니다.</p>
-    </div>
-    <div id="model-status" class="pill neutral" role="status">조회 중…</div>
-    <dl style="line-height:1.8; overflow-wrap:anywhere;">
-      <dt>모델을 가져오는 곳</dt><dd id="model-source">-</dd>
-      <dt>배포 대상으로 등록된 버전</dt><dd id="model-version">-</dd>
-      <dt>학습 검증 오차 (RMSE)</dt><dd id="model-rmse">-</dd>
-      <dt>모델 생성 시각</dt><dd id="model-created">-</dd>
-      <dt>서버가 알려 준 모델 이름표</dt><dd id="model-serving">-</dd>
-    </dl>
-    <p id="model-alignment" style="color:var(--muted);">실제 서빙 모델과 등록 모델의 일치 여부는 아직 확인되지 않았습니다.</p>
-    <p id="model-change" style="color:var(--muted);" role="status">아직 버전 변화가 관측되지 않았습니다.</p>
-    <button class="btn secondary" id="model-refresh" onclick="loadModelVersion()">버전 새로고침</button>
-  </div>
-
   <!-- ================= 탐지·재학습 이력 (D2) ================= -->
-  <div class="card">
+  <div class="card" id="history-card">
     <div class="section-head">
       <h2>탐지·재학습 이력</h2>
-      <p>서버 로그에 남은 시각과 결과를 최근 순으로 보여 줍니다. 시각은 서버 기록 그대로이며 시간대는 로그에 없습니다.
-        같은 요청인지 식별하는 번호가 없어, 겹치는 실행은 연결하지 않습니다. 배포 기준 미통과·중간 오류는 완료 로그가 없을 수 있습니다.</p>
+      <p>변화가 탐지된 순간부터 재학습 결과까지, 최근 기록 순으로 확인하세요.</p>
+      <details class="help-details"><summary>이력 해석 시 참고사항</summary><p>시각은 서버 기록 그대로이며 시간대는 로그에 없습니다. 요청 식별 번호가 없어 겹치는 실행은 연결하지 않습니다. 배포 기준 미통과·중간 오류는 완료 로그가 없을 수 있습니다.</p></details>
     </div>
     <button class="btn secondary" id="history-refresh" onclick="loadRetrainHistory()">이력 새로고침</button>
     <p id="history-status" role="status" style="color:var(--muted);">이력 조회 중…</p>
@@ -347,15 +468,12 @@
   </div>
 
   <!-- ================= 재학습 로그 ================= -->
-  <div class="card">
+  <div class="card" id="logs-card">
     <div class="section-head-row">
       <div class="section-head">
         <h2>재학습 로그</h2>
-        <p>
-          드리프트 감지·재학습 트리거는 <code>logs/aiops.log</code>에 그대로 기록됩니다.
-          <code>[WARN] drift detected</code> → <code>[INFO] retrain triggered</code> →
-          <code>[OK] new_rmse=... promoted</code> 기록을 확인하세요. 화면이 열려 있는 동안 5초마다 갱신합니다. [WARN]은 주의, [INFO]는 진행, [OK]는 배포 기준 통과를 뜻하며 예측 품질 개선을 보장하지 않습니다.
-        </p>
+        <p>서버가 남긴 원문 기록입니다. 화면을 보는 동안 5초마다 갱신합니다.</p>
+        <details class="help-details"><summary>로그 표시 안내</summary><p>[WARN]은 주의, [INFO]는 진행, [OK]는 배포 기준 통과입니다. 배포 기준 통과가 예측 품질 개선을 보장하지는 않습니다.</p></details>
       </div>
     </div>
     <button class="btn secondary" id="logs-refresh" onclick="loadLogFiles()">로그 새로고침</button>
@@ -364,9 +482,9 @@
     <div id="log-content" class="result-box"></div>
   </div>
 
-</div>
+</main>
 
-<footer>공항 도착 여객 예측 AIOps · 드리프트 감지 → 재학습 파이프라인 (serving_app/static/index.html)</footer>
+<footer>AIRPORT · AIOps &nbsp; / &nbsp; 항공기 도착 여객 예측 운영 대시보드</footer>
 
 <script>
 /* ===================== 전역 상태 ===================== */
@@ -385,8 +503,8 @@ let lastPipelineRun = null; // { driftCheck, clientRmse, ts }
 // 랜덤 정상 → 왼쪽, 랜덤 드리프트 → 오른쪽, CSV → 선택한 칸
 const lastBatchBySlot = { left: null, right: null };
 const SLOT_META = {
-  left: { color: "var(--chart-teal)" },
-  right: { color: "var(--chart-coral)" },
+  left: { color: "var(--chart-blue)", lightColor: "var(--chart-blue-light)" },
+  right: { color: "var(--chart-plum)", lightColor: "var(--chart-plum-light)" },
 };
 
 const NORMAL_SIGMA = 0.012;
@@ -894,10 +1012,10 @@ function metricTiles(entry, st) {
     ["판정 bias (서버, 실제−예측)", c.bias != null ? `${fmtSigned(c.bias)}명` : "응답에 없음"],
     ["승격 버전", promoted],
   ];
-  // 앞의 두 개(클라이언트 계산 RMSE·bias)는 큰 타일, 나머지(서버 판정 정보)는 목록
+  // 배치 수치는 위 요약에 한 번만 표시하고 서버 판정은 펼쳐서 확인한다.
   const cell = ([k, v]) => `<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div>`;
-  return `<div class="tiles">${tiles.slice(0, 2).map((t) => `<div class="tile">${cell(t)}</div>`).join("")}</div>
-    <div class="kv-list">${tiles.slice(2).map((t) => `<div class="kv">${cell(t)}</div>`).join("")}</div>`;
+  return `<details class="compare-details"><summary>판정·재학습 상세</summary>
+    <div class="kv-list">${tiles.slice(2).map((t) => `<div class="kv">${cell(t)}</div>`).join("")}</div></details>`;
 }
 /* ---- 인라인 SVG 차트 (라이브러리 없음, 재사용) ---- */
 const CHART_BOX = { w: 440, h: 180, left: 58, right: 10, top: 10, bottom: 24 };
@@ -948,7 +1066,7 @@ function svgHoverColumns(n, box, tips, hoverId, markers = []) {
   return tips.map((tip, i) => {
     const cx = box.left + i * xStep(n, box);
     const dots = markers.map((mk) =>
-      `<circle class="hv" cx="${mk.pts[i].x.toFixed(1)}" cy="${mk.pts[i].y.toFixed(1)}" r="4.5" style="fill:var(--panel);stroke:${mk.color};stroke-width:2.5"/>`).join("");
+      `<circle class="hv" cx="${mk.pts[i].x.toFixed(1)}" cy="${mk.pts[i].y.toFixed(1)}" r="4.5" style="fill:var(--panel);stroke:${mk.color};stroke-width:2;vector-effect:non-scaling-stroke"/>`).join("");
     return `<g class="hcol" data-hover="${hoverId}" data-tip="${escapeHtml(tip)}" onmouseenter="chartHover(this)">
       <rect x="${(cx - step / 2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${box.h}" fill="transparent"/>
       <line class="hv" x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${box.top}" y2="${box.h - box.bottom}" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:3 3"/>
@@ -967,23 +1085,30 @@ function svgXLabels(n, box) {
 // series: [{ values, color(CSS 변수), dash, area }] - area면 선 아래를 그라디언트로 채운다
 function svgLineChart({ series, extent, tips, hoverId, box = CHART_BOX }) {
   const base = box.h - box.bottom;
+  // 원래 2px 선 아래에만 반투명 블러를 합성해 색 번짐을 추가한다.
+  const glowId = `${hoverId}-glow`;
+  const glow = `<filter id="${glowId}" filterUnits="userSpaceOnUse" x="-12" y="-12" width="${box.w + 24}" height="${box.h + 24}" color-interpolation-filters="sRGB">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="2.2" result="blur"/>
+    <feComponentTransfer in="blur" result="soft-glow"><feFuncA type="linear" slope="0.48"/></feComponentTransfer>
+    <feMerge><feMergeNode in="soft-glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>`;
   const all = series.map((s) => ({ ...s, pts: linePoints(s.values, extent, box) }));
   const defs = all.map((s, i) => s.area ? `<linearGradient id="${hoverId}-g${i}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" style="stop-color:${s.color};stop-opacity:0.28"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>` : "").join("");
+      <stop offset="0" style="stop-color:${s.color};stop-opacity:0.16"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>` : "").join("");
   const areas = all.map((s, i) => {
     if (!s.area || !s.pts.length) return "";
     const first = s.pts[0], last = s.pts[s.pts.length - 1];
     return `<path d="${smoothPath(s.pts)} L${last.x.toFixed(1)},${base} L${first.x.toFixed(1)},${base} Z" style="fill:url(#${hoverId}-g${i})"/>`;
   }).join("");
   const lines = all.map((s) =>
-    `<path d="${smoothPath(s.pts)}" fill="none" style="stroke:${s.color};stroke-width:${s.dash ? 2 : 2.6};stroke-linecap:round;stroke-linejoin:round${s.dash ? ";stroke-dasharray:6 5" : ""}"/>`).join("");
+    `<path d="${smoothPath(s.pts)}" fill="none" filter="url(#${glowId})" style="stroke:${s.color};stroke-width:2;vector-effect:non-scaling-stroke;stroke-linecap:round;stroke-linejoin:round${s.dash ? ";stroke-dasharray:6 5" : ""}"/>`).join("");
   // 마지막 점(가장 최근 날)을 강조
   const ends = all.map((s) => {
     const p = s.pts[s.pts.length - 1];
-    return p ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" style="fill:var(--panel);stroke:${s.color};stroke-width:2.5"/>` : "";
+    return p ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" style="fill:var(--panel);stroke:${s.color};stroke-width:2;vector-effect:non-scaling-stroke"/>` : "";
   }).join("");
   const mid = (box.top + base) / 2;
-  return `<svg viewBox="0 0 ${box.w} ${box.h}" role="img"><defs>${defs}</defs>
+  return `<svg viewBox="0 0 ${box.w} ${box.h}" role="img"><defs>${defs}${glow}</defs>
     ${svgHLine(box.top, box)}${svgHLine(mid, box)}${svgHLine(base, box)}
     ${svgYLabel(box.top, fmtInt(extent[1]), box)}${svgYLabel(base, fmtInt(extent[0]), box)}
     ${svgXLabels(tips.length, box)}
@@ -1026,26 +1151,27 @@ function compareCharts(kind, st, ext) {
   return `
     <div class="chart">
       <div class="chart-title"><b>실제 vs 예측</b> <span class="sub">${st.n}건 · 명 · x축 = n번째</span>
-        <span class="legend"><span class="legend-swatch" style="background:var(--series-actual)"></span>실제 (보낸 값)</span>
-        <span class="legend"><span class="legend-swatch dashed" style="border-color:var(--series-pred)"></span>예측 (응답 predictions)</span>
+        <span class="legend"><span class="legend-swatch" style="background:var(--series-actual)"></span>실제</span>
+        <span class="legend"><span class="legend-swatch dashed" style="border-color:var(--series-pred)"></span>예측</span>
       </div>
       ${svgLineChart({ series: [
         { values: st.actual, color: "var(--series-actual)", area: true },
         { values: st.pred, color: "var(--series-pred)", dash: true },
       ], extent: ext.level, tips, hoverId })}
     </div>
+    <details class="compare-details"><summary>날짜별 오차 보기</summary>
     <div class="chart">
       <div class="chart-title"><b>오차</b> <span class="sub">실제 − 예측 · 명</span>
         <span class="legend"><span class="legend-swatch" style="background:var(--err-over)"></span>+ 실제가 더 큼 (낮게 예측)</span>
         <span class="legend"><span class="legend-swatch" style="background:var(--err-under)"></span>− 실제가 더 작음 (높게 예측)</span>
       </div>
       ${svgErrorBars({ values: st.err, extent: ext.err, tips, hoverId })}
-    </div>
+    </div></details>
     <div class="chart-hover" id="${hoverId}">그래프에 마우스를 올리면 n번째 · 실제 · 예측 · 오차가 보입니다</div>`;
 }
 
 // 요약 가로 막대: 막대는 0에서 값까지. {x, width, y, height}를 돌려준다
-const HBAR_BOX = { w: 440, left: 112, right: 76, top: 22, row: 30, barH: 10 };
+const HBAR_BOX = { w: 440, left: 112, right: 76, top: 22, row: 30, barH: 14 };
 function hbarRects(values, domain, box = HBAR_BOX) {
   const x = scaleLinear(domain, [box.left, box.w - box.right]);
   const x0 = x(Math.max(domain[0], 0));
@@ -1056,10 +1182,13 @@ function hbarRects(values, domain, box = HBAR_BOX) {
 }
 // items: [{ label, value(null이면 미전송), color }], refs: [{ value, label }]
 // 둥근 트랙(전체 범위) 위에 0에서 값까지 둥근 막대, 기준값은 점선
-function svgHBars({ items, domain, refs, fmt, box = HBAR_BOX }) {
+function svgHBars({ items, domain, refs, fmt, gradientId, box = HBAR_BOX }) {
   const x = scaleLinear(domain, [box.left, box.w - box.right]);
   const h = box.top + items.length * box.row + 2;
   const rects = hbarRects(items.map((it) => it.value), domain, box);
+  const gradients = items.map((it, i) => `<linearGradient id="${gradientId}-${i}" x1="${it.value < 0 ? 1 : 0}" y1="0" x2="${it.value < 0 ? 0 : 1}" y2="0">
+    <stop offset="0" style="stop-color:${it.lightColor || it.color}"/><stop offset="1" style="stop-color:${it.color}"/>
+  </linearGradient>`).join("");
   const rows = items.map((it, i) => {
     const r = rects[i];
     const cy = box.top + i * box.row + box.row / 2;
@@ -1069,16 +1198,18 @@ function svgHBars({ items, domain, refs, fmt, box = HBAR_BOX }) {
     const track = `<rect x="${box.left}" y="${ty.toFixed(1)}" width="${box.w - box.left - box.right}" height="${box.barH}" rx="${box.barH / 2}" style="fill:var(--chart-track)"/>`;
     if (!r) return label + track + `<text x="${box.w - box.right + 10}" y="${cy.toFixed(1)}" dominant-baseline="middle" style="fill:var(--faint);font-size:11px">미전송</text>`;
     return label + track
-      + `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${Math.max(1, r.width).toFixed(1)}" height="${r.height}" rx="${(Math.min(r.height, r.width) / 2).toFixed(1)}" style="fill:${it.color}"><title>${escapeHtml(it.label + " " + fmt(it.value))}</title></rect>`
+      + `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${Math.max(1, r.width).toFixed(1)}" height="${r.height}" rx="${(Math.min(r.height, r.width) / 2).toFixed(1)}" style="fill:url(#${gradientId}-${i})"><title>${escapeHtml(it.label + " " + fmt(it.value))}</title></rect>`
       + `<text x="${(box.w - box.right + 10).toFixed(1)}" y="${cy.toFixed(1)}" dominant-baseline="middle" style="fill:var(--text);font-size:12px;font-family:var(--mono);font-weight:700">${escapeHtml(fmt(it.value))}</text>`;
   }).join("");
   const lines = refs.map((ref) => {
     const rx = x(ref.value).toFixed(1);
-    return `<line x1="${rx}" x2="${rx}" y1="${box.top - 2}" y2="${h - 2}" style="stroke:var(--err);stroke-width:1.2;stroke-dasharray:3 3"/>`
-      + `<text x="${rx}" y="${box.top - 7}" text-anchor="middle" style="fill:var(--err);font-size:10px;font-family:var(--mono);font-weight:700">${escapeHtml(ref.label)}</text>`;
+    const anchor = domain[0] < 0 ? (ref.value < 0 ? "end" : "start") : "middle";
+    const dx = domain[0] < 0 ? (ref.value < 0 ? -6 : 6) : 0;
+    return `<line x1="${rx}" x2="${rx}" y1="${box.top - 2}" y2="${h - 2}" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:3 3"/>`
+      + `<text x="${rx}" dx="${dx}" y="${box.top - 7}" text-anchor="${anchor}" style="fill:var(--muted);font-size:10px;font-family:var(--mono);font-weight:700">${escapeHtml(ref.label)}</text>`;
   }).join("");
   const zero = domain[0] < 0 ? `<line x1="${x(0).toFixed(1)}" x2="${x(0).toFixed(1)}" y1="${box.top}" y2="${h - 2}" style="stroke:var(--faint);stroke-width:1"/>` : "";
-  return `<svg viewBox="0 0 ${box.w} ${h}" role="img">${rows}${zero}${lines}</svg>`;
+  return `<svg viewBox="0 0 ${box.w} ${h}" role="img"><defs>${gradients}</defs>${rows}${zero}${lines}</svg>`;
 }
 function summaryDomains(stats) {
   const sent = Object.values(stats).filter(Boolean);
@@ -1093,21 +1224,21 @@ function renderCompareSummary(stats) {
     return;
   }
   const d = summaryDomains(stats);
-  const row = (k, key) => ({ label: lastBatchBySlot[k] ? lastBatchBySlot[k].short : "-", color: SLOT_META[k].color, value: stats[k] ? stats[k][key] : null });
+  const row = (k, key) => ({ label: lastBatchBySlot[k] ? lastBatchBySlot[k].short : "-", color: SLOT_META[k].color, lightColor: SLOT_META[k].lightColor, value: stats[k] ? stats[k][key] : null });
   el.innerHTML = `
     <div class="cmp-summary-grid">
       <div class="summary-panel">
-        <div class="chart-title"><b>배치 RMSE</b> <span class="sub">클라이언트 계산 · 보낸 값 vs 예측</span></div>
+        <div class="chart-title"><b>예측 오차 (RMSE)</b> <span class="sub">작을수록 실제 값에 가까움</span></div>
         ${svgHBars({ items: [row("left", "rmse"), row("right", "rmse")],
-          domain: d.rmse, refs: [{ value: RMSE_THRESHOLD, label: fmtInt(RMSE_THRESHOLD) }], fmt: (v) => `${fmtInt(v)}명` })}
-        <div class="summary-note">점선 = RMSE_THRESHOLD ${fmtInt(RMSE_THRESHOLD)}명 (구조 변화 경고·배포 게이트 기준)</div>
+          gradientId: "cmp-rmse-bar", domain: d.rmse, refs: [{ value: RMSE_THRESHOLD, label: fmtInt(RMSE_THRESHOLD) }], fmt: (v) => `${fmtInt(v)}명` })}
+        <div class="summary-note">참고선 ${fmtInt(RMSE_THRESHOLD)}명 · 전체 배치 오차이며 학습 검증 오차와 다릅니다.</div>
       </div>
       <div class="summary-panel">
-        <div class="chart-title"><b>배치 bias</b> <span class="sub">클라이언트 계산 · 실제 − 예측 평균</span></div>
+        <div class="chart-title"><b>평균 치우침 (bias)</b> <span class="sub">0에 가까울수록 치우침이 적음</span></div>
         ${svgHBars({ items: [row("left", "bias"), row("right", "bias")],
-          domain: d.bias, refs: [{ value: -BIAS_THRESHOLD, label: fmtSigned(-BIAS_THRESHOLD) }, { value: BIAS_THRESHOLD, label: fmtSigned(BIAS_THRESHOLD) }],
+          gradientId: "cmp-bias-bar", domain: d.bias, refs: [{ value: -BIAS_THRESHOLD, label: fmtSigned(-BIAS_THRESHOLD) }, { value: BIAS_THRESHOLD, label: fmtSigned(BIAS_THRESHOLD) }],
           fmt: (v) => `${fmtSigned(v)}명` })}
-        <div class="summary-note">점선 = ±BIAS_THRESHOLD ${fmtInt(BIAS_THRESHOLD)}명 (넘으면 재학습) · 가운데 실선 = 0</div>
+        <div class="summary-note">참고선 ±${fmtInt(BIAS_THRESHOLD)}명 · 실제 재학습 판정은 이상치를 제외한 최근 21건 기준입니다.</div>
       </div>
     </div>`;
 }
@@ -1127,8 +1258,8 @@ function renderCompareColumn(slot, entry, st, ext) {
   if (!entry) return `<div class="cmp-empty">아직 전송 안 함</div>`;
   const ts = new Date(entry.ts * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
   return `<h3><span>${dot}${escapeHtml(entry.source)}</span><span class="ts">${ts} 전송</span></h3>
-    ${metricTiles(entry, st)}
-    ${compareCharts(slot, st, ext)}`;
+    ${compareCharts(slot, st, ext)}
+    ${metricTiles(entry, st)}`;
 }
 function renderCompare() {
   const slots = ["left", "right"];
