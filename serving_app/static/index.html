@@ -1010,9 +1010,9 @@ function renderCompareColumn(slot, entry, st, ext) {
   const meta = SLOT_META[slot];
   const dot = `<span class="kind-dot" style="background:${meta.color}"></span>`;
   if (!entry) return `<h3><span>${dot}${meta.title}</span></h3><div class="cmp-empty">아직 전송 안 함</div>`;
-  const ts = new Date(entry.ts * 1000).toLocaleTimeString("ko-KR");
+  const ts = new Date(entry.ts * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
   return `<h3><span>${dot}${meta.title}</span><span class="ts">${ts} 전송</span></h3>
-    <div class="cmp-source">출처: ${escapeHtml(entry.source)}</div>
+    <div class="cmp-source">${escapeHtml(entry.source)}</div>
     ${metricTiles(entry, st)}
     ${compareCharts(slot, st, ext)}`;
 }

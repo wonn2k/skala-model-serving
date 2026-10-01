@@ -545,6 +545,7 @@ function batchArrivals(kind, n) {
 - 2026-10-01 15:27 | youjin09222/D1 | main `8f22c4e` 위로 rebase, C의 `recent` 연결 확인 후 `FALLBACK_RECENT`·임시 데이터 배지·`resolveRecent()` 제거, 측정값을 보간 CSV 기준으로 재측정 | `GET /data/status` recent 20행(정수), curl `/predict` 200(local 41304.39 v1-local / mlflow 39980.96 production v1), 19개 422 too_short, node `loadForecast()` 성공·422·원복 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
 - 2026-10-01 15:32 | youjin09222/D1 | 4번 섹션 측정값에 브라우저 카드 ms·예측값 추가, 증빙 [D1] 5행(버전 전환 전·후 분리, 미촬영·파일명 제안), D2·B에 파이프라인 문구 요청 추가 | 브라우저 카드 v1 39,981명 보통 44 ms → v3 40,501명 혼잡 187 ms (새 모델 로드 포함), 이후 새로고침 2회 미측정. 캡처 미촬영. 버전 1→3은 `logs/aiops.log` 15:29:07 v2·15:29:58 v3 승격 | feat/d1-forecast-card
 - 2026-10-01 16:11 | youjin09222/D1 | D1이 D2·E 영역 작업, 팀 공유 후 진행: 라이트 테마, 두 배치 나란히 비교(왼쪽/오른쪽 칸, CSV 칸 선택), 파이프라인 문구 `bias vs ±500`, `BIAS_THRESHOLD`. 버튼 비활성화·배지·파이프라인 단계는 #14 구현 사용 | 비교 수치 35개 일치(실제 서버, Python 독립 계산), 칸 배정 CSV 2건·랜덤 1건 확인(v11~v13), `node --check` 통과, 외부 리소스 없음 | feat/d-dashboard-compare
+- 2026-10-01 16:40 | youjin09222/D1 | 비교 칸 출처 줄에서 "출처:" 접두어 제거, 전송 시각을 시:분으로 표시 | `node --check` 통과, 저장된 응답으로 렌더링: "왼쪽 (기준) · 오후 4:26 전송 · 랜덤 정상", "오른쪽 (비교) · 오후 4:26 전송 · 랜덤 드리프트" | feat/d-dashboard-compare / #23
 
 - 2026-10-01 | D2 | main 976b069의 D1 예측 카드와 PR #20 충돌 해결. init에서 D1 예측과 D2 모니터 조회를 모두 시작하며 두 담당자의 상태·측정·변경 기록 보존 | 기존 화면 점검 53개 통과, compileall 통과. `/tmp/d2-init-merge-check.cjs`로 D1 함수·기록 보존 및 예측 대기 중 D2 초기화/주기 조회 진행 확인 | feat/d2-monitor-main
 
