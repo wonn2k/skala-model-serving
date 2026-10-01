@@ -121,7 +121,7 @@
   - `routers/data.py`: `POST /data/upload`(컬럼 `Date,Arrivals,Departures` 검사, 최소 행 수 `SEQ_LEN + WINDOW_SIZE` = 41, `data/uploads/`에 저장) / `GET /data/status`(행 수, 기간, 최소·최대). `data/storage.py`의 `latest_upload()`가 최신 파일 경로를 준다.
   - `scripts/train_baseline_v1.py`: Day1. 최신 업로드로 학습 → 마지막 20% 검증 RMSE → 게이트 → `serving_app/models/airport_v1.keras`, `scaler.pkl` 저장.
   - `train_and_register.py`: `train_and_register()` — seed 42, 100 epoch → `rmse()` → MLflow run 기록 → `_register_if_gate_passed()`가 통과 시 `Airport_Arrivals_Predictor` 등록 + Production 승격. `fine_tune(rows)` — Production 가중치에서 10 epoch, LR 1e-4, 같은 게이트 (호출은 B의 TODO 4).
-  - `routers/monitor.py` (신설 예정): `GET /monitor/versions` → MLflow Registry에서 Production 버전·run_id·RMSE·생성 시각 (`docs/API_SPEC.md`).
+  - `routers/monitor.py` (신설 완료): `GET /monitor/versions` → MLflow Registry의 Production 버전·run_id·rmse·created_at과, 서버가 실제로 들고 있는 모델(`serving_version`, `serving_run_id`)을 함께 반환. 둘이 어긋났는지는 `stale`로 표시한다. `MODEL_SOURCE=local`이면 `production`은 null.
   - `Dockerfile`: 이미지 빌드 중 baseline + MLflow 학습 실행, `MODEL_SOURCE=mlflow`, `LOADING_MODE=eager`로 기동.
 - **흐름**: 대시보드 CSV 업로드 → `data/uploads/` → `train_baseline_v1.py`(로컬 모델) → `train_and_register.py`(MLflow run → 게이트 → Registry → Production) → A의 `_load_from_mlflow()`가 읽는다.
 - **다른 영역과의 연결**
@@ -138,8 +138,8 @@
 - 모델 파일(`*.keras`, `scaler.pkl`)과 MLflow 기록(`mlflow.db`, `mlruns/`)은 커밋하지 않는다. 각자 PC에서 업로드 → baseline → MLflow 학습을 직접 실행해야 한다.
 - `fine_tune()`은 스켈레톤에 구현되어 있다. 호출하는 쪽(B의 TODO 4)이 미구현이라 실행 기록은 없다.
 - 승격 시 기존 Production 버전을 Archived로 내리지 않는다. Production에 여러 버전이 남을 수 있다 (사전 실험에서 확인, 5번).
-- `GET /data/status`의 `recent`: 미구현. 설계: 최신 업로드의 마지막 `SEQ_LEN`(20)행, 오래된 순, `[{date, arrivals, departures}]` 정수.
-- `GET /monitor/versions`: 미구현. 설계: `docs/API_SPEC.md`.
+- `GET /data/status`의 `recent`: **구현 완료.** 최신 업로드의 마지막 `SEQ_LEN`(20)행, 오래된 날 → 최근 날 순서, `[{date, arrivals, departures}]` 정수. D1이 이 값을 그대로 `/predict`의 `sequence`로 보내면 200이 나오는 것까지 확인했다.
+- `GET /monitor/versions`: **구현 완료.** 다만 `stale` 판정은 아직 항상 `null`이다. `LoadedModel`이 `version` 문자열("production")만 들고 있고 어느 run에서 왔는지 모르기 때문이다. A가 `run_id`를 보관해 주면 `production.run_id`와 비교해 판정할 수 있다 (아래 "다른 영역에 요청").
 - Docker: 미확인. TODO 1이 구현되기 전에는 컨테이너 기동이 실패할 것으로 예상된다.
 
 ### 측정값
@@ -151,7 +151,11 @@
 | 다른 PC에서의 게이트 통과 여부 | 미측정 | |
 | 학습 소요 시간 (100 epoch) | 미측정 | |
 | 컨테이너 빌드 시간 / 기동 성공 여부 | 미측정 | |
-| `GET /monitor/versions` 응답 예시 | 미측정 | |
+| `GET /monitor/versions` 응답 예시 | `{"model_name":"Airport_Arrivals_Predictor","model_source":"mlflow","production":{"version":1,"run_id":"bbec6d0d...","rmse":2266.94,"created_at":1790831552595},"serving_version":"production","serving_run_id":null,"stale":null}` | PC 1대, `MODEL_SOURCE=mlflow uvicorn ... --port 8000` 후 `curl localhost:8000/monitor/versions` |
+| `GET /data/status`의 `recent` | 20건, `2025-10-12` ~ `2025-10-31`, 오래된 순, arrivals/departures 모두 int | PC 1대, `curl localhost:8000/data/status` |
+| `recent`를 그대로 `/predict`에 전달 | HTTP 200, `{"predicted_arrivals":39772.69,"model_version":"production"}` | PC 1대, `/data/status`의 recent를 `sequence`로 변환해 POST |
+| Day1 baseline RMSE (이 PC) | 2,945명 | PC 2대째, `python scripts/train_baseline_v1.py`. 다른 PC에서는 2,571명과 2,191명이 나왔다 |
+| Day2 MLflow 학습 RMSE (이 PC) | 2,267명 (2266.94) | PC 2대째, `python serving_app/train_and_register.py`. seed 42 고정이라 다른 PC와 같은 값 |
 
 ### 트러블슈팅
 
@@ -169,11 +173,15 @@
 
 ### 다른 영역에 요청
 
-(아직 없음)
+- **A에게**: `LoadedModel`이 `run_id`를 함께 보관해 주면 좋겠다. `_load_from_mlflow()`에서 로드한 모델이 어느 run에서 왔는지 알 수 있으면, `GET /monitor/versions`가 "레지스트리는 v2인데 서버는 v1을 들고 있다"를 자동으로 판정할 수 있다. 지금은 `stale`이 항상 `null`이다.
+  재배포 후 캐시가 안 비워지는 문제(수업 가이드 부록1의 6번)를 **대시보드에서 눈으로 볼 수 있게** 만드는 일이라, D2의 버전 표기와도 이어진다. `LoadedModel.__init__`에 `run_id=None` 인자를 하나 늘리는 정도면 충분하다.
+- **D1에게**: `GET /data/status`의 `recent`가 올라갔다. 20건, 오래된 날 → 최근 날 순서이고 그대로 `/predict`의 `sequence`로 보내면 된다 (`arrivals`를 float로만 바꾸면 됨). 확인 완료.
+- **D2에게**: `GET /monitor/versions`가 올라갔다. `production.version`과 `production.rmse`를 쓰면 되고, `stale`은 A의 작업 전까지 `null`이라 표시하지 않는 편이 낫다.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | Day1·Day2 실행 결과 기록 | Day1 RMSE 2,571명 (`python scripts/train_baseline_v1.py`), Day2 RMSE 2,267명 (`python serving_app/train_and_register.py`) | main
+- 2026-10-01 13:10 | 유경모 | `GET /monitor/versions` 신설(`routers/monitor.py`, `main.py` 한 줄), `GET /data/status`에 `recent` 20건 추가 | `/monitor/versions`가 Production v1, rmse 2266.94 반환. `recent`를 그대로 `/predict`에 보내 HTTP 200 확인. Day1 2,945명 / Day2 2,267명 | feat/monitor-versions-and-recent
 
 ---
 
