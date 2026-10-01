@@ -7,21 +7,37 @@
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <style>
   :root {
-    --bg: #0a0c10;
-    --panel: #12151c;
-    --panel-2: #171b25;
-    --border: #262b38;
-    --text: #eef1f7;
-    --muted: #9aa4b8;
-    --faint: #5b6478;
-    --accent: #6c8dff;
-    --accent-soft: rgba(108, 141, 255, 0.16);
-    --ok: #3ddc97;
-    --ok-soft: rgba(61, 220, 151, 0.14);
-    --warn: #f5b64c;
-    --warn-soft: rgba(245, 182, 76, 0.14);
-    --err: #ff6b6b;
-    --err-soft: rgba(255, 107, 107, 0.14);
+    /* 라이트 테마. 글자 대비(흰 배경 기준): text 16.2:1, muted 6.6:1, faint 4.8:1, accent 6.5:1 */
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --panel-2: #f1f3f6;
+    --border: #d9dee6;
+    --text: #1b2030;
+    --muted: #545d6e;
+    --faint: #6b7385;
+    --accent: #3451d1;
+    --accent-2: #7b93ec;
+    --accent-soft: rgba(52, 81, 209, 0.10);
+    --on-accent: #ffffff;
+    --ok: #17703f;
+    --ok-soft: rgba(23, 112, 63, 0.10);
+    --warn: #9a5800;
+    --warn-soft: rgba(154, 88, 0, 0.12);
+    --err: #c62828;
+    --err-soft: rgba(198, 40, 40, 0.10);
+    --on-danger: #ffffff;
+    --border-soft: #eceef3;
+    --shadow: 0 1px 2px rgba(27, 32, 48, 0.04), 0 8px 24px rgba(27, 32, 48, 0.06);
+    /* 차트 색 (흰 배경 그래픽 대비: coral 3.5:1, indigo 4.9:1, teal 4.6:1) */
+    --chart-coral: #d9673f;
+    --chart-indigo: #5566d8;
+    --chart-teal: #2a8378;
+    --chart-grid: #e6e9ef;
+    --chart-track: #f0f2f7;
+    --series-actual: var(--chart-coral);
+    --series-pred: var(--chart-indigo);
+    --err-over: var(--chart-coral);   /* 실제 − 예측 > 0 (모델이 낮게 예측) */
+    --err-under: var(--chart-indigo); /* 실제 − 예측 < 0 (모델이 높게 예측) */
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, sans-serif;
   }
@@ -36,8 +52,8 @@
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand-mark {
     width: 34px; height: 34px; border-radius: 9px;
-    background: linear-gradient(135deg, var(--accent), #a9bdff);
-    display: flex; align-items: center; justify-content: center; color: #0a0c10;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; justify-content: center; color: var(--on-accent);
     flex-shrink: 0;
   }
   .brand-text .title { font-weight: 700; font-size: 1.02rem; line-height: 1.2; }
@@ -56,8 +72,8 @@
   .page { max-width: 980px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 
   .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
-    padding: 18px 20px;
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: 18px;
+    padding: 20px 22px; box-shadow: var(--shadow);
   }
   .section-head { margin-bottom: 14px; }
   .section-head h2 { margin: 0 0 3px; font-size: 1.05rem; }
@@ -65,9 +81,9 @@
   .section-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
   .btn { border: none; border-radius: 9px; padding: 9px 14px; font-size: 0.83rem; font-weight: 700; cursor: pointer; }
-  .btn.primary { background: var(--accent); color: #0a0c10; }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
   .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
-  .btn.danger { background: var(--err); color: #1a0a0a; }
+  .btn.danger { background: var(--err); color: var(--on-danger); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
 
@@ -78,14 +94,53 @@
   .fc-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .fc-trend { margin-top: 16px; }
   .fc-trend-title { font-size: 0.74rem; color: var(--muted); margin-bottom: 6px; }
-  .fc-bars { display: flex; align-items: flex-end; gap: 3px; height: 110px; }
+  .fc-bars { display: flex; align-items: flex-end; gap: 5px; height: 110px; }
   .fc-bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; min-width: 0; }
-  .fc-bar { background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; opacity: 0.75; }
-  .fc-bar-col:hover .fc-bar { opacity: 1; }
-  .fc-bar-col:last-child .fc-bar { opacity: 1; }
-  .fc-labels { display: flex; gap: 3px; margin-top: 4px; }
+  .fc-bar { background: var(--chart-indigo); border-radius: 6px; min-height: 4px; opacity: 0.35; transition: opacity 0.15s; }
+  .fc-bar-col:hover .fc-bar { opacity: 0.85; }
+  .fc-bar-col:last-child .fc-bar { background: var(--chart-coral); opacity: 1; }
+  .fc-labels { display: flex; gap: 5px; margin-top: 4px; }
   .fc-label { flex: 1; min-width: 0; text-align: center; font-size: 0.6rem; color: var(--faint); font-family: var(--mono); overflow: hidden; white-space: nowrap; }
-  .fc-hover { font-size: 0.74rem; color: var(--muted); margin-top: 6px; font-family: var(--mono); min-height: 1.1em; }
+  .fc-hover { font-size: 0.74rem; color: var(--muted); margin-top: 6px; min-height: 1.1em; font-variant-numeric: tabular-nums; }
+
+  /* ---------- Drift compare (정상 vs 드리프트) ---------- */
+  .cmp-summary { margin-top: 16px; }
+  .cmp-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .summary-panel { background: var(--panel-2); border-radius: 14px; padding: 4px 14px 10px; min-width: 0; }
+  .summary-panel svg { width: 100%; height: auto; display: block; }
+  .summary-note { font-size: 0.68rem; color: var(--faint); margin-top: 2px; }
+  .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+  @media (max-width: 720px) { .cmp-grid, .cmp-summary-grid { grid-template-columns: 1fr; } }
+  .cmp-col { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 16px; padding: 14px 16px; min-width: 0; box-shadow: var(--shadow); }
+  .cmp-col h3 { margin: 0 0 10px; font-size: 0.95rem; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .cmp-col h3 .kind-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+  .cmp-col h3 .ts { font-size: 0.72rem; color: var(--faint); font-weight: 500; }
+  .cmp-empty { color: var(--faint); font-size: 0.82rem; padding: 28px 4px; text-align: center; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { background: var(--panel-2); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+  .tile .k { font-size: 0.68rem; color: var(--muted); line-height: 1.3; }
+  .tile .v { font-family: var(--mono); font-weight: 800; font-size: 1.35rem; margin-top: 4px; color: var(--text); letter-spacing: -0.01em; }
+  .kv-list { margin-top: 8px; }
+  .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--border-soft); }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { font-size: 0.74rem; color: var(--muted); }
+  .kv .v { font-family: var(--mono); font-weight: 700; font-size: 0.84rem; color: var(--text); text-align: right; overflow-wrap: anywhere; }
+  .chart-title { font-size: 0.72rem; color: var(--muted); margin: 14px 0 6px; display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; }
+  .chart-title b { color: var(--text); font-size: 0.82rem; }
+  .chart-title .sub { color: var(--faint); }
+  .chart-title .legend { display: inline-flex; align-items: center; }
+  .legend-swatch { display: inline-block; width: 16px; height: 4px; border-radius: 2px; margin-right: 5px; }
+  .legend-swatch.dashed { height: 0; border-top: 2.5px dashed; background: none; width: 18px; }
+  .chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .chart .hcol .hv { opacity: 0; transition: opacity 0.12s; }
+  .chart .hcol:hover .hv { opacity: 1; }
+  .chart-hover { font-size: 0.74rem; color: var(--muted); min-height: 1.1em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .cmp-col h3 > span:first-child { overflow-wrap: anywhere; }
+  .cmp-col h3 .ts { flex-shrink: 0; }
+  .slot-choice { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 0.82rem; color: var(--muted); }
+  .slot-choice label { display: inline-flex; gap: 5px; align-items: center; color: var(--text); cursor: pointer; }
+  .raw-json { margin-top: 12px; }
+  .raw-json summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); }
 
   /* ---------- Upload ---------- */
   .upload-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -143,7 +198,7 @@
 <div class="topnav">
   <div class="brand">
     <div class="brand-mark">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-10 2 3h5" stroke="#0a0c10" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-10 2 3h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <div class="brand-text">
       <div class="title">AIOps · 공항 도착 여객 예측</div>
@@ -214,6 +269,11 @@
         <input type="file" id="batch-csv-input" accept=".csv,text/csv" aria-describedby="batch-csv-help batch-csv-summary" onchange="previewCsvBatch()" />
         <button id="batch-csv-send" class="btn primary" data-batch-action onclick="sendCsvBatch()" disabled>CSV 배치 전송</button>
       </div>
+      <div class="slot-choice" role="radiogroup" aria-label="CSV 결과를 넣을 비교 칸">
+        <span>비교 칸:</span>
+        <label><input type="radio" name="csv-slot" value="left" checked /> 왼쪽 칸</label>
+        <label><input type="radio" name="csv-slot" value="right" /> 오른쪽 칸</label>
+      </div>
       <p id="batch-csv-summary" role="status" style="margin-top:10px;">파일을 선택하면 기간과 행 수를 확인할 수 있습니다.</p>
     </div>
     <div id="drift-legend" class="btn-row" role="group" aria-label="판정 상태 색상 안내">
@@ -224,7 +284,15 @@
       <span class="pill" data-drift-state="rolled_back"><span class="dot" aria-hidden="true"></span>롤백 · 이전 모델 복귀</span>
     </div>
     <div id="drift-status" role="status" style="margin-top:14px;"></div>
-    <div id="drift-result" class="result-box"></div>
+    <div id="cmp-summary" class="cmp-summary"></div>
+    <div class="cmp-grid">
+      <div class="cmp-col" id="cmp-left"></div>
+      <div class="cmp-col" id="cmp-right"></div>
+    </div>
+    <details class="raw-json">
+      <summary>마지막 응답 JSON 원문 (증빙용)</summary>
+      <div id="drift-result" class="result-box"></div>
+    </details>
   </div>
 
   <!-- ================= 파이프라인 ================= -->
@@ -306,11 +374,20 @@
 const SEQ_LEN = 20;
 const WINDOW_SIZE = 21;
 const RMSE_THRESHOLD = 2700;
+// 드리프트 판정 기준: 이상치 제외 21건의 |bias(실제 − 예측 평균)| > 이 값이면 재학습 (serving_app/monitoring/drift_detector.py BIAS_THRESHOLD)
+const BIAS_THRESHOLD = 500;
 // 혼잡 등급 경계(명) - data/README.md "사분위 Q1 / Q3" 행(34,962 / 40,177)과 같은 값
 const CONGESTION_HIGH = 40177; // Q3: 초과면 혼잡
 const CONGESTION_LOW = 34962;  // Q1: 미만이면 여유, 그 사이는 보통
 
 let lastPipelineRun = null; // { driftCheck, clientRmse, ts }
+// 비교 칸별 마지막 성공 결과 { arrivals, predictions, drift_check, ts, source } (페이지 메모리에만)
+// 랜덤 정상 → 왼쪽, 랜덤 드리프트 → 오른쪽, CSV → 선택한 칸
+const lastBatchBySlot = { left: null, right: null };
+const SLOT_META = {
+  left: { color: "var(--chart-teal)" },
+  right: { color: "var(--chart-coral)" },
+};
 
 const NORMAL_SIGMA = 0.012;
 const DRIFT_SIGMA = NORMAL_SIGMA * 3;
@@ -318,7 +395,7 @@ const DEFAULT_BASE_ARRIVALS = 37000; // 대상 공항 일평균 도착 여객 �
 const PIPELINE_STAGES = [
   { key: "collect", title: "데이터 수집", desc: "요청 수신" },
   { key: "monitor", title: "데이터 모니터링", desc: "예측 기록 누적" },
-  { key: "detect", title: "드리프트 감지", desc: "RMSE vs 임계치" },
+  { key: "detect", title: "드리프트 감지", desc: "bias vs ±500" },
   { key: "trigger", title: "재학습 트리거", desc: "조건 충족 시 시작" },
   { key: "train", title: "모델 학습", desc: "fine-tuning" },
   { key: "register", title: "모델 등록", desc: "MLflow Registry" },
@@ -785,6 +862,296 @@ function stageHtml(stage, idx, state, statusLabel) {
     </div>`;
 }
 
+/* ===================== 두 배치 나란히 비교 (왼쪽 / 오른쪽) ===================== */
+// 부호는 서버(drift_detector.compute_bias)와 같게 오차 = 실제 − 예측
+function fmtSigned(n) {
+  const r = Math.round(n);
+  return (r > 0 ? "+" : r < 0 ? "−" : "") + Math.abs(r).toLocaleString("ko-KR");
+}
+// 실제값 = 보낸 arrivals의 SEQ_LEN 이후 값 (서버 batch_test의 actual과 같은 정의)
+function batchStats(entry) {
+  const actual = entry.arrivals.slice(SEQ_LEN);
+  const n = Math.min(actual.length, entry.predictions.length);
+  const a = actual.slice(0, n), p = entry.predictions.slice(0, n);
+  const err = a.map((v, i) => v - p[i]);
+  const bias = n ? err.reduce((s, e) => s + e, 0) / n : null;
+  return { n, actual: a, pred: p, err, rmse: rmseOf(a, p), bias };
+}
+function metricTiles(entry, st) {
+  const c = entry.drift_check || {};
+  const judged = ["ok", "anomaly", "structure_drift"].includes(c.status);
+  const retrained = c.status === "retrain_triggered" || c.status === "rolled_back";
+  let promoted = "-";
+  if (c.status === "retrain_triggered" && c.promoted === true) promoted = `v${c.version}`;
+  else if (c.status === "retrain_triggered" && c.promoted === false) promoted = "미승격 (게이트 실패)";
+  else if (c.status === "rolled_back") promoted = `롤백 → v${c.production_version}`;
+  const tiles = [
+    [`배치 RMSE (클라이언트, ${st.n}쌍)`, st.rmse != null ? `${fmtInt(st.rmse)}명` : "-"],
+    ["배치 bias (클라이언트, 실제−예측)", st.bias != null ? `${fmtSigned(st.bias)}명` : "-"],
+    ["판정 status (서버)", c.status ?? "-"],
+    ["재학습", retrained ? "실행" : "없음"],
+    [judged ? "판정 RMSE (서버, 윈도우 21건)" : "재학습 검증 RMSE (서버)", c.rmse != null ? `${fmtInt(c.rmse)}명` : "-"],
+    ["판정 bias (서버, 실제−예측)", c.bias != null ? `${fmtSigned(c.bias)}명` : "응답에 없음"],
+    ["승격 버전", promoted],
+  ];
+  // 앞의 두 개(클라이언트 계산 RMSE·bias)는 큰 타일, 나머지(서버 판정 정보)는 목록
+  const cell = ([k, v]) => `<div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div>`;
+  return `<div class="tiles">${tiles.slice(0, 2).map((t) => `<div class="tile">${cell(t)}</div>`).join("")}</div>
+    <div class="kv-list">${tiles.slice(2).map((t) => `<div class="kv">${cell(t)}</div>`).join("")}</div>`;
+}
+/* ---- 인라인 SVG 차트 (라이브러리 없음, 재사용) ---- */
+const CHART_BOX = { w: 440, h: 180, left: 58, right: 10, top: 10, bottom: 24 };
+function scaleLinear([d0, d1], [r0, r1]) {
+  const span = d1 - d0 || 1;
+  return (v) => r0 + ((v - d0) / span) * (r1 - r0);
+}
+function xStep(n, box) { return n > 1 ? (box.w - box.left - box.right) / (n - 1) : 0; }
+// 점 좌표: x는 1..n번째를 등간격, y는 extent [min, max]를 [아래, 위]로
+function linePoints(values, extent, box = CHART_BOX) {
+  const y = scaleLinear(extent, [box.h - box.bottom, box.top]);
+  const step = xStep(values.length, box);
+  return values.map((v, i) => ({ x: box.left + i * step, y: y(v) }));
+}
+function svgYLabel(y, text, box) {
+  return `<text x="${box.left - 8}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" style="fill:var(--faint);font-size:10px;font-family:var(--mono)">${escapeHtml(text)}</text>`;
+}
+function svgHLine(y, box) {
+  return `<line x1="${box.left}" x2="${box.w - box.right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" style="stroke:var(--chart-grid);stroke-width:1;stroke-dasharray:4 4"/>`;
+}
+// 부드러운 곡선: 단조 3차 보간(Fritsch–Carlson). 이웃한 두 점 사이에서 값이 두 점 범위를 넘지 않는다 (과장 없음)
+function smoothPath(pts) {
+  const n = pts.length;
+  if (n === 0) return "";
+  const f = (v) => v.toFixed(1);
+  if (n < 3) return `M${f(pts[0].x)},${f(pts[0].y)}` + pts.slice(1).map((p) => ` L${f(p.x)},${f(p.y)}`).join("");
+  const dx = [], m = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1].x - pts[i].x; m[i] = (pts[i + 1].y - pts[i].y) / dx[i]; }
+  const t = [m[0]];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+  t[n - 1] = m[n - 2];
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], s = a * a + b * b;
+    if (s > 9) { const k = 3 / Math.sqrt(s); t[i] = k * a * m[i]; t[i + 1] = k * b * m[i]; }
+  }
+  let d = `M${f(pts[0].x)},${f(pts[0].y)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    d += ` C${f(pts[i].x + h)},${f(pts[i].y + t[i] * h)} ${f(pts[i + 1].x - h)},${f(pts[i + 1].y - t[i + 1] * h)} ${f(pts[i + 1].x)},${f(pts[i + 1].y)}`;
+  }
+  return d;
+}
+// 마우스 오버용 세로 띠. 올리면 점선 가이드와 해당 점이 나타나고 data-tip을 hoverId 요소에 표시한다
+// markers: [{ pts, color }] - 띠마다 같은 인덱스의 점을 강조
+function svgHoverColumns(n, box, tips, hoverId, markers = []) {
+  const step = xStep(n, box) || (box.w - box.left - box.right);
+  return tips.map((tip, i) => {
+    const cx = box.left + i * xStep(n, box);
+    const dots = markers.map((mk) =>
+      `<circle class="hv" cx="${mk.pts[i].x.toFixed(1)}" cy="${mk.pts[i].y.toFixed(1)}" r="4.5" style="fill:var(--panel);stroke:${mk.color};stroke-width:2.5"/>`).join("");
+    return `<g class="hcol" data-hover="${hoverId}" data-tip="${escapeHtml(tip)}" onmouseenter="chartHover(this)">
+      <rect x="${(cx - step / 2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${box.h}" fill="transparent"/>
+      <line class="hv" x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${box.top}" y2="${box.h - box.bottom}" style="stroke:var(--faint);stroke-width:1;stroke-dasharray:3 3"/>
+      ${dots}<title>${escapeHtml(tip)}</title></g>`;
+  }).join("");
+}
+function chartHover(el) {
+  const target = document.getElementById(el.getAttribute("data-hover"));
+  if (target) target.textContent = el.getAttribute("data-tip");
+}
+// x축 눈금: 1번째, 마지막, 그 사이 몇 개
+function svgXLabels(n, box) {
+  const idx = [...new Set([0, Math.round((n - 1) / 3), Math.round((2 * (n - 1)) / 3), n - 1])].filter((i) => i >= 0);
+  return idx.map((i) => `<text x="${(box.left + i * xStep(n, box)).toFixed(1)}" y="${box.h - 6}" text-anchor="middle" style="fill:var(--faint);font-size:10px;font-family:var(--mono)">${i + 1}</text>`).join("");
+}
+// series: [{ values, color(CSS 변수), dash, area }] - area면 선 아래를 그라디언트로 채운다
+function svgLineChart({ series, extent, tips, hoverId, box = CHART_BOX }) {
+  const base = box.h - box.bottom;
+  const all = series.map((s) => ({ ...s, pts: linePoints(s.values, extent, box) }));
+  const defs = all.map((s, i) => s.area ? `<linearGradient id="${hoverId}-g${i}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" style="stop-color:${s.color};stop-opacity:0.28"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>` : "").join("");
+  const areas = all.map((s, i) => {
+    if (!s.area || !s.pts.length) return "";
+    const first = s.pts[0], last = s.pts[s.pts.length - 1];
+    return `<path d="${smoothPath(s.pts)} L${last.x.toFixed(1)},${base} L${first.x.toFixed(1)},${base} Z" style="fill:url(#${hoverId}-g${i})"/>`;
+  }).join("");
+  const lines = all.map((s) =>
+    `<path d="${smoothPath(s.pts)}" fill="none" style="stroke:${s.color};stroke-width:${s.dash ? 2 : 2.6};stroke-linecap:round;stroke-linejoin:round${s.dash ? ";stroke-dasharray:6 5" : ""}"/>`).join("");
+  // 마지막 점(가장 최근 날)을 강조
+  const ends = all.map((s) => {
+    const p = s.pts[s.pts.length - 1];
+    return p ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" style="fill:var(--panel);stroke:${s.color};stroke-width:2.5"/>` : "";
+  }).join("");
+  const mid = (box.top + base) / 2;
+  return `<svg viewBox="0 0 ${box.w} ${box.h}" role="img"><defs>${defs}</defs>
+    ${svgHLine(box.top, box)}${svgHLine(mid, box)}${svgHLine(base, box)}
+    ${svgYLabel(box.top, fmtInt(extent[1]), box)}${svgYLabel(base, fmtInt(extent[0]), box)}
+    ${svgXLabels(tips.length, box)}
+    ${areas}${lines}${ends}${svgHoverColumns(tips.length, box, tips, hoverId, all.map((s) => ({ pts: s.pts, color: s.color })))}</svg>`;
+}
+const ERR_BOX = { ...CHART_BOX, h: 120, bottom: 8 };
+// 0 기준 위아래 막대. 각 막대 {x, y, width, height}를 돌려준다 (y는 SVG 좌표, 위가 작다)
+function errorBarRects(values, extent, box = ERR_BOX) {
+  const y = scaleLinear(extent, [box.h - box.bottom, box.top]);
+  const step = xStep(values.length, box) || (box.w - box.left - box.right);
+  const width = Math.max(2, step * 0.56);
+  const y0 = y(0);
+  return values.map((v, i) => {
+    const yv = y(v);
+    return { x: box.left + i * xStep(values.length, box) - width / 2, y: Math.min(y0, yv), width, height: Math.abs(yv - y0), positive: v >= 0 };
+  });
+}
+function svgErrorBars({ values, extent, tips, hoverId, box = ERR_BOX }) {
+  const y = scaleLinear(extent, [box.h - box.bottom, box.top]);
+  const rects = errorBarRects(values, extent, box);
+  // 연한 세로 트랙 위에 둥근 막대 (값 막대는 0에서 시작)
+  const tracks = rects.map((r) =>
+    `<rect x="${r.x.toFixed(1)}" y="${box.top}" width="${r.width.toFixed(1)}" height="${box.h - box.bottom - box.top}" rx="${(r.width / 2).toFixed(1)}" style="fill:var(--chart-track)"/>`).join("");
+  const bars = rects.map((r) =>
+    `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${r.width.toFixed(1)}" height="${Math.max(1, r.height).toFixed(1)}" rx="${Math.min(r.width / 2, r.height / 2).toFixed(1)}" style="fill:${r.positive ? "var(--err-over)" : "var(--err-under)"}"/>`).join("");
+  return `<svg viewBox="0 0 ${box.w} ${box.h}" role="img">
+    ${svgYLabel(box.top, fmtSigned(extent[1]), box)}${svgYLabel(y(0), "0", box)}${svgYLabel(box.h - box.bottom, fmtSigned(extent[0]), box)}
+    ${tracks}
+    <line x1="${box.left}" x2="${box.w - box.right}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" style="stroke:var(--faint);stroke-width:1"/>
+    ${bars}
+    ${svgHoverColumns(tips.length, box, tips, hoverId)}</svg>`;
+}
+function batchTips(st) {
+  return st.actual.map((a, i) =>
+    `${i + 1}번째 · 실제 ${fmtInt(a)}명 · 예측 ${fmtInt(st.pred[i])}명 · 오차(실제−예측) ${fmtSigned(st.err[i])}명`);
+}
+function compareCharts(kind, st, ext) {
+  const hoverId = `cmp-hover-${kind}`;
+  const tips = batchTips(st);
+  return `
+    <div class="chart">
+      <div class="chart-title"><b>실제 vs 예측</b> <span class="sub">${st.n}건 · 명 · x축 = n번째</span>
+        <span class="legend"><span class="legend-swatch" style="background:var(--series-actual)"></span>실제 (보낸 값)</span>
+        <span class="legend"><span class="legend-swatch dashed" style="border-color:var(--series-pred)"></span>예측 (응답 predictions)</span>
+      </div>
+      ${svgLineChart({ series: [
+        { values: st.actual, color: "var(--series-actual)", area: true },
+        { values: st.pred, color: "var(--series-pred)", dash: true },
+      ], extent: ext.level, tips, hoverId })}
+    </div>
+    <div class="chart">
+      <div class="chart-title"><b>오차</b> <span class="sub">실제 − 예측 · 명</span>
+        <span class="legend"><span class="legend-swatch" style="background:var(--err-over)"></span>+ 실제가 더 큼 (낮게 예측)</span>
+        <span class="legend"><span class="legend-swatch" style="background:var(--err-under)"></span>− 실제가 더 작음 (높게 예측)</span>
+      </div>
+      ${svgErrorBars({ values: st.err, extent: ext.err, tips, hoverId })}
+    </div>
+    <div class="chart-hover" id="${hoverId}">그래프에 마우스를 올리면 n번째 · 실제 · 예측 · 오차가 보입니다</div>`;
+}
+
+// 요약 가로 막대: 막대는 0에서 값까지. {x, width, y, height}를 돌려준다
+const HBAR_BOX = { w: 440, left: 112, right: 76, top: 22, row: 30, barH: 10 };
+function hbarRects(values, domain, box = HBAR_BOX) {
+  const x = scaleLinear(domain, [box.left, box.w - box.right]);
+  const x0 = x(Math.max(domain[0], 0));
+  return values.map((v, i) => v == null ? null : {
+    x: Math.min(x0, x(v)), width: Math.abs(x(v) - x0),
+    y: box.top + i * box.row + (box.row - box.barH) / 2, height: box.barH,
+  });
+}
+// items: [{ label, value(null이면 미전송), color }], refs: [{ value, label }]
+// 둥근 트랙(전체 범위) 위에 0에서 값까지 둥근 막대, 기준값은 점선
+function svgHBars({ items, domain, refs, fmt, box = HBAR_BOX }) {
+  const x = scaleLinear(domain, [box.left, box.w - box.right]);
+  const h = box.top + items.length * box.row + 2;
+  const rects = hbarRects(items.map((it) => it.value), domain, box);
+  const rows = items.map((it, i) => {
+    const r = rects[i];
+    const cy = box.top + i * box.row + box.row / 2;
+    const ty = cy - box.barH / 2;
+    const label = `<circle cx="10" cy="${cy.toFixed(1)}" r="4" style="fill:${it.color}"/>`
+      + `<text x="20" y="${cy.toFixed(1)}" dominant-baseline="middle" style="fill:var(--text);font-size:11.5px;font-weight:600">${escapeHtml(it.label)}</text>`;
+    const track = `<rect x="${box.left}" y="${ty.toFixed(1)}" width="${box.w - box.left - box.right}" height="${box.barH}" rx="${box.barH / 2}" style="fill:var(--chart-track)"/>`;
+    if (!r) return label + track + `<text x="${box.w - box.right + 10}" y="${cy.toFixed(1)}" dominant-baseline="middle" style="fill:var(--faint);font-size:11px">미전송</text>`;
+    return label + track
+      + `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${Math.max(1, r.width).toFixed(1)}" height="${r.height}" rx="${(Math.min(r.height, r.width) / 2).toFixed(1)}" style="fill:${it.color}"><title>${escapeHtml(it.label + " " + fmt(it.value))}</title></rect>`
+      + `<text x="${(box.w - box.right + 10).toFixed(1)}" y="${cy.toFixed(1)}" dominant-baseline="middle" style="fill:var(--text);font-size:12px;font-family:var(--mono);font-weight:700">${escapeHtml(fmt(it.value))}</text>`;
+  }).join("");
+  const lines = refs.map((ref) => {
+    const rx = x(ref.value).toFixed(1);
+    return `<line x1="${rx}" x2="${rx}" y1="${box.top - 2}" y2="${h - 2}" style="stroke:var(--err);stroke-width:1.2;stroke-dasharray:3 3"/>`
+      + `<text x="${rx}" y="${box.top - 7}" text-anchor="middle" style="fill:var(--err);font-size:10px;font-family:var(--mono);font-weight:700">${escapeHtml(ref.label)}</text>`;
+  }).join("");
+  const zero = domain[0] < 0 ? `<line x1="${x(0).toFixed(1)}" x2="${x(0).toFixed(1)}" y1="${box.top}" y2="${h - 2}" style="stroke:var(--faint);stroke-width:1"/>` : "";
+  return `<svg viewBox="0 0 ${box.w} ${h}" role="img">${rows}${zero}${lines}</svg>`;
+}
+function summaryDomains(stats) {
+  const sent = Object.values(stats).filter(Boolean);
+  const rmseMax = Math.max(RMSE_THRESHOLD, ...sent.map((st) => st.rmse ?? 0)) * 1.1;
+  const biasMax = Math.max(BIAS_THRESHOLD, ...sent.map((st) => Math.abs(st.bias ?? 0))) * 1.15;
+  return { rmse: [0, rmseMax], bias: [-biasMax, biasMax] };
+}
+function renderCompareSummary(stats) {
+  const el = document.getElementById("cmp-summary");
+  if (!stats.left && !stats.right) {
+    el.innerHTML = `<div class="cmp-empty" style="padding:10px 4px;">배치를 보내면 두 칸에 결과가 나란히 놓입니다. 랜덤 정상 → 왼쪽 칸, 랜덤 드리프트 → 오른쪽 칸, CSV → 선택한 칸</div>`;
+    return;
+  }
+  const d = summaryDomains(stats);
+  const row = (k, key) => ({ label: lastBatchBySlot[k] ? lastBatchBySlot[k].short : "-", color: SLOT_META[k].color, value: stats[k] ? stats[k][key] : null });
+  el.innerHTML = `
+    <div class="cmp-summary-grid">
+      <div class="summary-panel">
+        <div class="chart-title"><b>배치 RMSE</b> <span class="sub">클라이언트 계산 · 보낸 값 vs 예측</span></div>
+        ${svgHBars({ items: [row("left", "rmse"), row("right", "rmse")],
+          domain: d.rmse, refs: [{ value: RMSE_THRESHOLD, label: fmtInt(RMSE_THRESHOLD) }], fmt: (v) => `${fmtInt(v)}명` })}
+        <div class="summary-note">점선 = RMSE_THRESHOLD ${fmtInt(RMSE_THRESHOLD)}명 (구조 변화 경고·배포 게이트 기준)</div>
+      </div>
+      <div class="summary-panel">
+        <div class="chart-title"><b>배치 bias</b> <span class="sub">클라이언트 계산 · 실제 − 예측 평균</span></div>
+        ${svgHBars({ items: [row("left", "bias"), row("right", "bias")],
+          domain: d.bias, refs: [{ value: -BIAS_THRESHOLD, label: fmtSigned(-BIAS_THRESHOLD) }, { value: BIAS_THRESHOLD, label: fmtSigned(BIAS_THRESHOLD) }],
+          fmt: (v) => `${fmtSigned(v)}명` })}
+        <div class="summary-note">점선 = ±BIAS_THRESHOLD ${fmtInt(BIAS_THRESHOLD)}명 (넘으면 재학습) · 가운데 실선 = 0</div>
+      </div>
+    </div>`;
+}
+
+// 두 배치의 차트가 같은 축을 쓰도록 공유 범위를 만든다
+function compareExtents(statsList) {
+  const vals = statsList.flatMap((st) => [...st.actual, ...st.pred]);
+  const errMax = Math.max(1, ...statsList.flatMap((st) => st.err.map(Math.abs)));
+  return {
+    level: vals.length ? [Math.min(...vals), Math.max(...vals)] : [0, 1],
+    err: [-errMax, errMax],
+  };
+}
+function renderCompareColumn(slot, entry, st, ext) {
+  const meta = SLOT_META[slot];
+  const dot = `<span class="kind-dot" style="background:${meta.color}"></span>`;
+  if (!entry) return `<div class="cmp-empty">아직 전송 안 함</div>`;
+  const ts = new Date(entry.ts * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
+  return `<h3><span>${dot}${escapeHtml(entry.source)}</span><span class="ts">${ts} 전송</span></h3>
+    ${metricTiles(entry, st)}
+    ${compareCharts(slot, st, ext)}`;
+}
+function renderCompare() {
+  const slots = ["left", "right"];
+  const stats = Object.fromEntries(slots.map((k) => [k, lastBatchBySlot[k] ? batchStats(lastBatchBySlot[k]) : null]));
+  const ext = compareExtents(slots.map((k) => stats[k]).filter(Boolean));
+  for (const k of slots) {
+    document.getElementById(`cmp-${k}`).innerHTML = renderCompareColumn(k, lastBatchBySlot[k], stats[k], ext);
+  }
+  renderCompareSummary(stats);
+}
+// 보낸 배치가 들어갈 칸과 출처 표시. 전송 시작 시점에 정한다 (응답 사이에 파일·선택이 바뀌어도 섞이지 않게)
+function batchTarget(kind) {
+  if (kind === "normal") return { slot: "left", source: "랜덤 정상", short: "랜덤 정상" };
+  if (kind === "drift") return { slot: "right", source: "랜덤 드리프트", short: "랜덤 드리프트" };
+  const picked = document.querySelector('input[name="csv-slot"]:checked');
+  const file = document.getElementById("batch-csv-input").files[0];
+  const period = csvBatch ? ` · ${csvBatch.start} ~ ${csvBatch.end}` : "";
+  // 요약 행에는 파일명 끝부분만 (예: …drift_41rows) - 시연 파일 한 쌍이 앞부분이 같아서
+  const stem = file ? file.name.replace(/\.csv$/i, "") : "CSV";
+  const short = stem.length > 12 ? `…${stem.slice(-11)}` : stem;
+  return { slot: picked && picked.value === "right" ? "right" : "left", source: `CSV · ${file ? file.name : "(파일명 없음)"}${period}`, short };
+}
+
 /* ===================== CSV 배치 입력 (D2) ===================== */
 let csvBatch = null;
 let batchSending = false;
@@ -880,6 +1247,7 @@ async function sendBatch(kind, csvArrivals = null) {
   const n = SEQ_LEN + WINDOW_SIZE;
   const sigma = kind === "drift" ? DRIFT_SIGMA : NORMAL_SIGMA;
   const arrivals = csvArrivals || randomWalk(n, DEFAULT_BASE_ARRIVALS, sigma);
+  const target = batchTarget(kind);
   batchSending = true;
   updateBatchControls();
   resultBox.classList.remove("show");
@@ -908,6 +1276,8 @@ async function sendBatch(kind, csvArrivals = null) {
     renderPipeline();
 
     const check = data.drift_check || {};
+    lastBatchBySlot[target.slot] = { arrivals, predictions: data.predictions || [], drift_check: check, ts: Date.now() / 1000, source: target.source, short: target.short };
+    renderCompare();
     const labels = {
       ok: ["ok", "정상 (재학습 없음)"],
       anomaly: ["warn", "일부 날짜의 큰 오차 감지 · 재학습 없음"],
@@ -940,6 +1310,7 @@ async function sendBatch(kind, csvArrivals = null) {
 /* ===================== 초기화 ===================== */
 async function init() {
   renderPipeline();
+  renderCompare();
   loadForecast(); // D1 예측은 모니터 조회를 기다리지 않는다.
   await refreshMonitorPanels();
   setInterval(() => { if (!document.hidden) refreshMonitorPanels(); }, 5000);

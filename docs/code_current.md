@@ -424,6 +424,7 @@ function batchArrivals(kind, n) {
   - [D2] 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. **CSV 배치 전송**은 브라우저에서 파일을 검증하고 같은 전송 함수에 `arrivals`를 전달한다. 출발 여객은 서버의 기존 고정값 37,000을 유지하며, CSV 시험 파일은 학습용 업로드를 대체하지 않는다.
   - [D2] 판정 배지·색상 안내: 정상 초록, 이상치 노랑, 구조적 패턴 변화 보라, 재학습 파랑, 롤백 빨강. D2 전용 선택자로 범위를 제한하고 공통 CSS·파이프라인 단계 색은 유지한다. 재학습의 승격/미승격 결과는 문구로 구분한다.
   - [D2] 탐지·재학습 이력 표: `aiops.log`를 읽어 탐지 내용·탐지/시작/완료 시각·등록 결과·버전을 최근 기록 순으로 표시한다. 화면 표시 중 5초 주기·수동·배치 종료 후 갱신하며 새로고침 시 로그에서 복원한다. 로그 원문은 아래 카드에서 확인한다.
+  - [D2] (D1 작성) 두 배치 나란히 비교: 드리프트 시뮬레이션 카드 안 `#cmp-summary`(RMSE·bias 가로 막대 + 기준 점선 2,700 / ±500) + `#cmp-left`·`#cmp-right` 두 칸(타일, 실제 vs 예측 곡선, 오차 막대). 랜덤 정상 → 왼쪽 칸, 랜덤 드리프트 → 오른쪽 칸, CSV → "비교 칸" 라디오(왼쪽 칸 / 오른쪽 칸)로 고른 칸. 보낸 칸의 제목은 출처("랜덤 정상" / "랜덤 드리프트" / "CSV · 파일명 · 기간")와 전송 시각(시:분), 빈 칸은 "아직 전송 안 함"만. 요약 막대 행 이름도 각 칸의 출처(CSV는 파일명 끝부분). 두 칸의 y축 범위를 같게 맞춘다. 인라인 SVG만 사용(라이브러리 없음). 응답 JSON 원문은 `<details>`로 접어 둔다.
   - [D2] 재학습 로그 카드: 목록에서 파일 선택(기본 `aiops.log`), 화면 표시 중 5초마다 조회. `[WARN]`/`[WARNING]`/`[ROLLBACK]` 주의, `[INFO]` 진행, `[OK]` 성공, `[ERROR]` 오류 색 구분. 로그 원문은 HTML로 해석하지 않는다.
   - [D2] Production 버전 표기: `GET /monitor/versions` → 등록 버전·학습 검증 RMSE·생성 시각·서버 식별자를 분리 표시. 성공한 조회 간 버전 변화 표시. 실제 서빙 반영이나 예측 품질 개선을 단정하지 않는다. 실제 C 응답의 `created_at` Unix 밀리초를 한국 시간으로 표시한다(ISO 문자열도 호환). `model_source=local`은 Registry 미조회로 표시한다. `registry_error`는 조회 실패로 표시하고 `serving_registry_version`은 실제 서빙 번호로 표시한다. `stale=null`은 일치 미확인으로 유지한다.
   - 데이터 업로드 카드(스켈레톤): `POST /data/upload`.
@@ -431,7 +432,7 @@ function batchArrivals(kind, n) {
   - [D1] 페이지 로드(`init()`에서 await 없이 호출) 또는 새로고침 버튼 또는 업로드 성공 → `GET /data/status` → `exists=false`면 "데이터를 먼저 업로드하세요" → `recent` 20행(오래된 날 → 최근 날)을 그대로 입력으로 사용 (20행 배열이 아니면 실패 상태) → `{"sequence":[{arrivals, departures} × 20]}` 정수로 `POST /predict` → `predicted_arrivals` → 등급 판정(`CONGESTION_HIGH` 40,177명 초과 혼잡 / `CONGESTION_LOW` 34,962명 미만 여유 / 경계값 포함 그 사이 보통) → 카드 표시. 실패는 422(detail 요약) / 그 밖의 4xx·5xx(상태 코드 + 원문) / 네트워크 오류로 나눠 이 카드 안에서만 표시한다.
   - [D2] CSV 선택 → 파싱 → `batch-test` → `drift_check` 표시 → 로그 카드가 `[WARN]`→`[OK]` 갱신 → 버전 표기 갱신.
 - **다른 영역과의 연결**: C의 `recent` 필드와 `/monitor/versions`. A의 `/predict` 응답 형식(`predicted_arrivals`, `model_version`). B의 `BatchTestRequest` 형식(`arrivals`, 추가되면 `departures`). 스켈레톤 상수 `RMSE_THRESHOLD = 2700`, `DEFAULT_BASE_ARRIVALS = 37000`은 서버 값 복제 — 서버가 바뀌면 함께 (E가 알린다).
-- **설정**: `RMSE_THRESHOLD`, `DEFAULT_BASE_ARRIVALS` (index.html 상단), [D1] 등급 경계 상수 `CONGESTION_HIGH = 40177`, `CONGESTION_LOW = 34962` (index.html `<script>` 상단, 확정) — `data/README.md` 사분위 Q3/Q1과 같게.
+- **설정**: `RMSE_THRESHOLD`, [D2] (D1 작성) `BIAS_THRESHOLD = 500`(`drift_detector.py` 복제), `DEFAULT_BASE_ARRIVALS` (index.html 상단), [D2] (D1 작성) 테마: 라이트 — 색은 `:root` 변수에만 둔다 (글자 대비 text 16.2:1, muted 6.6:1, faint 4.8:1, 차트 coral 3.5:1 · indigo 4.9:1 · teal 4.6:1), [D1] 등급 경계 상수 `CONGESTION_HIGH = 40177`, `CONGESTION_LOW = 34962` (index.html `<script>` 상단, 확정) — `data/README.md` 사분위 Q3/Q1과 같게.
 - **실행**: `http://localhost:8000/`
 
 ### 현재 상태
@@ -447,6 +448,8 @@ function batchArrivals(kind, n) {
 - [D2] 현재 `batch_test()`는 B가 구현했다. 화면은 `ok`/`anomaly`/`structure_drift`/`retrain_triggered`/`rolled_back`를 구분하며, 알 수 없는 상태를 정상으로 표시하지 않는다. 재학습·승격과 예측 품질 개선은 별도 검증 대상이다. 정상 CSV 서버 시험(`ok`)과 D2 CSV 버튼을 통한 확정 배치(`structure_drift`)를 실제 모델로 확인했다. 승격과 캐시 갱신 후 `/predict`의 실제 등록 번호 1→2도 확인했다. 품질 개선 비교는 미측정. 이번 제출은 main `fd760c0` 통합 기준이며 C의 모델 비교는 run_id 우선, 없으면 등록 번호를 사용한다.
 
 - [D2] 버전·로그를 화면 표시 중 5초마다 조회하고 수동 새로고침도 지원. 배치 성공·실패 뒤 모두 재조회하며 중복 조회를 막는다. 실패 시 오래된 값을 현재 값으로 표시하지 않으며 조회 요청은 8초에 시간 초과 처리한다. 브라우저에서 v1→v2 관측 변화와 WARN→INFO→OK 로그를 확인했다. 이전 실측은 별도의 `/predict.model_registry_version`으로 반영을 확인했다. 최신 C 코드는 등록 번호를 비교해 `stale`을 반환하며, 모델 로드 전에는 null이다.
+- [D2] (D1 작성) 라이트 테마 적용. 하드코딩 색 5곳을 변수로 정리. 파이프라인 "드리프트 감지" 설명을 `RMSE vs 임계치` → `bias vs ±500`으로 고침 (B 판정 기준).
+- [D2] (D1 작성) 두 배치 비교는 #14의 `sendBatch(kind, csvArrivals)`에 붙였다: 전송 시작 시 `batchTarget(kind)`로 칸·출처를 정하고, 성공하면 `lastBatchBySlot`에 보관 후 `renderCompare()`. 결과는 페이지 메모리에만 있다(새로고침하면 빈 칸). 버튼 비활성화·상태 배지·파이프라인 단계는 #14 구현을 그대로 쓴다.
 
 - [D2] 판정 5종을 서로 다른 색과 설명 문구로 표시하고 색상 안내를 추가했다. 알 수 없는 판정은 회색이며, 전송 중·통신 오류를 판정 결과로 취급하지 않는다.
 
@@ -461,6 +464,8 @@ function batchArrivals(kind, n) {
 | [D1] `/predict` 왕복 시간, `MODEL_SOURCE=local` (curl `time_total`) | 1회차 1.829673s (lazy 모델 로드 포함) / 2회차 0.015298s / 3회차 0.014600s | 위 조건, 서버 기동 후 학습 → 첫 요청부터 3회 연속, 같은 20행 입력 |
 | [D1] `/predict` 왕복 시간, `MODEL_SOURCE=mlflow` (curl `time_total`) | 1회차 2.556365s (lazy MLflow 모델 로드 포함) / 2회차 0.016117s / 3회차 0.015749s | 위 조건, `MODEL_SOURCE=mlflow`로 서버 재시작 직후 3회 연속, 로컬 sqlite `mlflow.db`, 로드 버전 v1 |
 | [D1] 등급 경계값 (`congestionLevel()`) | 34961 → 여유 / 34962 → 보통 / 40177 → 보통 / 40178 → 혼잡 | index.html `<script>`를 추출해 node `vm`으로 실제 함수 호출 |
+| [D2] (D1 작성) 비교 차트 수치 일치 | 35개 항목 일치: 정상 배치 클라이언트 RMSE·bias = 서버 `drift_check` 533.5709725306 / −281.9296839497 (소수 10자리), 드리프트 배치 2,137 / +1,252 = `aiops.log` 판정값, 타일·공유 축·곡선 21점·오차 막대 21개·요약 막대 좌표 | 페이지 `sendBatch()`를 node로 실행(DOM 스텁)해 실제 서버로 랜덤 정상·드리프트 전송, 저장한 요청·응답으로 Python 독립 계산과 비교. main `56bf712` 기준 서버, Production v3에서 시작 |
+| [D2] (D1 작성) 비교 칸 배정 (#14 위) | CSV `jeju_demo_shift_batch_normal_41rows.csv` → 왼쪽(판정 rmse 1764 / bias −1025), `…_drift_41rows.csv` → 오른쪽(1887 / +1061), 이어서 랜덤 정상 → 왼쪽 교체, 오른쪽 유지 | main `1507bff` + D1, node로 `parseBatchCsv`·`sendCsvBatch`·`sendBatch` 실행, 실제 서버. 로컬 Registry가 이미 v10(fine-tune 반복)이라 세 배치 모두 드리프트 → v11·v12·v13 승격. E의 시연 순서(v1에서 시작)와 결과가 다른 것은 시작 모델이 달라서다 |
 | [D2] 브라우저 CSV 미리보기 | 2025-01-09 ~ 2025-02-18, 41일, 예측 비교 21일 | `jeju_drift_batch_41rows.csv` 실제 파일 선택, 전송 버튼 활성화 확인. 실제 전송은 하지 않음 |
 | [D2] 정상 CSV 실제 배치 | RMSE 898.5326646816719명, bias −241.1471457935515명, `ok`, 예측 21개, HTTP 200, 0.3319초 | `jeju_demo_drift_batch_normal_41rows.csv`, 모델 v1, HTTP 요청 |
 | [D2] CSV 버튼 실제 배치 | 전체 RMSE 5924.090023249845명, `structure_drift`, 이상치 1일; 로그의 이상치 제외 RMSE 3169명 / bias +199명 | `jeju_demo_drift_batch_confirm_41rows.csv`, 모델 v2, 브라우저 파일 선택→CSV 배치 전송. 전체 오차와 판정용 제외 오차를 구분 |
@@ -489,6 +494,17 @@ function batchArrivals(kind, n) {
   - 원인: 서버 로그 ``ValueError: File not found: filepath=serving_app/models/airport_v1.keras. Please ensure the file is an accessible `.keras` zip file.`` — 새 환경이라 로컬 모델 파일이 없었다
   - 해결 명령: 대시보드 대신 `curl -F file=@data/jeju_airport_arrivals.csv localhost:8000/data/upload` (1035행) → `python scripts/train_baseline_v1.py` (`baseline v1 RMSE = 2517명`)
   - 전후 결과: 같은 요청이 HTTP 500 → HTTP 200 `{"predicted_arrivals":40924.95,"model_version":"v1-local","model_registry_version":null}`
+- [D2] (D1 작성) 배치 2건 동시 전송으로 Production 중복 승격 (v6·v7)
+  - 증상: 2026-10-01 15:53 이 브랜치의 이전 작업본(#14 반영 전)에서 배치 버튼이 연달아 눌려 `POST /predict/batch-test` 2건이 서로 다른 연결(127.0.0.1:53655, :53658)로 겹쳐 처리됐고 1.4초 간격으로 두 번 승격됐다. `logs/aiops.log` 원문:
+    ```
+    2026-10-01 15:53:21,994 [WARNING] [WARN] drift detected - rmse=1451 bias=-892 (excluding 0 anomaly day(s)) - triggering retrain
+    2026-10-01 15:53:24,192 [WARNING] [WARN] drift detected - rmse=2246 bias=+1160 (excluding 0 anomaly day(s)) - triggering retrain
+    2026-10-01 15:53:27,297 [INFO] [OK] new_rmse=2233 - production promoted: Airport_Arrivals_Predictor v6
+    2026-10-01 15:53:28,672 [INFO] [OK] new_rmse=2233 - production promoted: Airport_Arrivals_Predictor v7
+    ```
+  - 원인: 화면에서 전송 중에도 버튼이 눌렸고, 서버 `check_and_trigger()`에 동시 실행 방지가 없어 두 요청이 같은 v5·같은 데이터로 각각 fine-tune했다 (둘 다 `new_rmse=2233`).
+  - 해결: D2의 #14가 같은 방식(전송 중 `[data-batch-action]` 버튼 비활성화, `batchSending` 재진입 방지)으로 이미 해결해 main에 머지됨. 이 브랜치는 #14 구현을 그대로 쓴다. 서버 쪽은 B에 요청.
+  - 전후 결과: 전 = 요청 2건 → 승격 2회. 후(#14 위) = node로 CSV 2건·랜덤 1건을 순서대로 보냈을 때 요청 3건 → 승격 3회(v11·v12·v13), 겹침 없음. 브라우저 연타 확인은 미측정.
 
 - 2026-10-01 | D2 | 버전 API 404 → C 담당 API 미구현 → 화면은 `-`와 조회 준비 중 표시. 실제 로그 200/빈 content는 정상적인 기록 없음으로 구분. 통신 실패·지연·파일 전환·로그 내 HTML 문자열은 대체 응답으로 확인.
 
@@ -525,7 +541,9 @@ function batchArrivals(kind, n) {
 - E: 최신 main에도 `CLAUDE.md`·`PROJECT_PLAN.md` 일부에 “main은 10 epoch/팀 합의 전”이 남아 있지만 현재 코드는 3 epoch이며 보간 데이터도 병합됐다. `API_SPEC.md`에는 완료 API가 여전히 TODO/설계안이다. 문서 충돌을 알리며 D2에서 정책을 임의 변경하지 않는다. 이번 변경은 판정 기준·공통 상수를 바꾸지 않고 서버 상태를 표시한다. 파이프라인 공통 상수의 `RMSE vs 임계치` 문구도 현행 판정에 맞춘 정리 요청. 상단 `MODEL_SOURCE=mlflow 기준` 문구는 실행 모드와 무관한 고정값이므로 추후 정리 요청(이번 서버는 실제 mlflow 모드). 임시 DB 파일은 최신 main에서 삭제된 것을 확인했다. D1 현황에 남은 recent 미구현 표기도 최신 C 코드와 다름.
 
 - [D1] A: 모델 파일이 없을 때 `/predict`가 사유 없는 텍스트 500(`Internal Server Error`)을 준다. 사유가 담긴 JSON 오류 응답(예: 503 + `{"detail": "모델 파일 없음: serving_app/models/airport_v1.keras"}`) 검토 요청. 카드는 `detail`이 오면 그대로 표시할 수 있다.
-- [D1] D2·B: 파이프라인 카드의 "드리프트 감지" 단계 설명 `RMSE vs 임계치`(index.html `PIPELINE_STAGES`)가 실제 판정과 다르다. 실제로는 bias 기준으로 판정해 RMSE가 임계치 2,700보다 낮아도 재학습한다 (`logs/aiops.log` 2026-10-01 15:29:02 `drift detected - rmse=889 bias=+813 … triggering retrain`). 문구 수정(D2)과 판정 기준 표기 확인(B) 요청.
+- [D1] D2·B: 파이프라인 "드리프트 감지" 설명 `RMSE vs 임계치` 불일치 → `feat/d-dashboard-compare`에서 `bias vs ±500`으로 고침 (D2 영역 수정, PR에 명시). B는 판정 기준 표기만 확인 부탁.
+- [D2] (D1 작성) B: `check_and_trigger()`에 동시 실행 방지가 없다. `/predict/batch-test`가 겹치면 같은 데이터로 두 번 재학습·승격된다 (위 트러블슈팅 v6·v7). 화면은 #14로 막았지만 `scripts/simulate_drift.py`·curl은 겹칠 수 있다. 재학습 구간 잠금(예: `threading.Lock`, 재학습 중이면 건너뛰고 status로 알림) 검토 요청. `aiops.log`에는 두 감지 줄이 모두 남았다(로그 누락 없음).
+- [D2] (D1 작성) E: `index.html` 상단에 `BIAS_THRESHOLD = 500`(`drift_detector.py` 복제)을 추가했다. CLAUDE.md 상수 표의 "대시보드 상수 복제" 행에 반영 요청.
 
 ### 변경 기록
 
@@ -546,6 +564,9 @@ function batchArrivals(kind, n) {
 - 2026-10-01 15:08 | youjin09222/D1 | index.html에 내일 도착 여객 예측·혼잡 등급 카드 추가 (상태 4종, 20일 막대, model_version·registry_version, 왕복 ms, FALLBACK_RECENT 분기) | curl `/predict` 20개 200(local 40924.95 v1-local / mlflow 41799.6 production v3), 19개 422 too_short, 경계값 4건 node 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
 - 2026-10-01 15:27 | youjin09222/D1 | main `8f22c4e` 위로 rebase, C의 `recent` 연결 확인 후 `FALLBACK_RECENT`·임시 데이터 배지·`resolveRecent()` 제거, 측정값을 보간 CSV 기준으로 재측정 | `GET /data/status` recent 20행(정수), curl `/predict` 200(local 41304.39 v1-local / mlflow 39980.96 production v1), 19개 422 too_short, node `loadForecast()` 성공·422·원복 확인, `python -m compileall -q data scripts serving_app` 통과, `/health` 200. 브라우저 ms·캡처 미측정 | feat/d1-forecast-card
 - 2026-10-01 15:32 | youjin09222/D1 | 4번 섹션 측정값에 브라우저 카드 ms·예측값 추가, 증빙 [D1] 5행(버전 전환 전·후 분리, 미촬영·파일명 제안), D2·B에 파이프라인 문구 요청 추가 | 브라우저 카드 v1 39,981명 보통 44 ms → v3 40,501명 혼잡 187 ms (새 모델 로드 포함), 이후 새로고침 2회 미측정. 캡처 미촬영. 버전 1→3은 `logs/aiops.log` 15:29:07 v2·15:29:58 v3 승격 | feat/d1-forecast-card
+- 2026-10-01 16:11 | youjin09222/D1 | D1이 D2·E 영역 작업, 팀 공유 후 진행: 라이트 테마, 두 배치 나란히 비교(왼쪽/오른쪽 칸, CSV 칸 선택), 파이프라인 문구 `bias vs ±500`, `BIAS_THRESHOLD`. 버튼 비활성화·배지·파이프라인 단계는 #14 구현 사용 | 비교 수치 35개 일치(실제 서버, Python 독립 계산), 칸 배정 CSV 2건·랜덤 1건 확인(v11~v13), `node --check` 통과, 외부 리소스 없음 | feat/d-dashboard-compare
+- 2026-10-01 16:40 | youjin09222/D1 | 비교 칸 출처 줄에서 "출처:" 접두어 제거, 전송 시각을 시:분으로 표시 | `node --check` 통과, 저장된 응답으로 렌더링: "왼쪽 (기준) · 오후 4:26 전송 · 랜덤 정상", "오른쪽 (비교) · 오후 4:26 전송 · 랜덤 드리프트" | feat/d-dashboard-compare / #23
+- 2026-10-01 16:50 | youjin09222/D1 | 비교 영역에서 방향 표기 제거(칸 제목 = 출처, 빈 칸은 안내만, 요약 행 이름 = 출처, CSV 선택만 "왼쪽 칸/오른쪽 칸"). 버그 수정: 칸 키를 left/right로 바꾼 뒤에도 요약이 `stats.normal`/`stats.drift`를 확인해 요약 막대가 그려지지 않던 문제 | `node --check` 통과, 저장된 실제 응답으로 렌더링: 제목 "랜덤 정상 오후 4:26 전송", 요약 SVG 2개, RMSE 막대 폭 45.3/181.3px = 독립 계산, 헤드리스 Chrome 화면 확인 | feat/d-dashboard-compare / #23
 
 - 2026-10-01 | D2 | main 976b069의 D1 예측 카드와 PR #20 충돌 해결. init에서 D1 예측과 D2 모니터 조회를 모두 시작하며 두 담당자의 상태·측정·변경 기록 보존 | 기존 화면 점검 53개 통과, compileall 통과. `/tmp/d2-init-merge-check.cjs`로 D1 함수·기록 보존 및 예측 대기 중 D2 초기화/주기 조회 진행 확인 | feat/d2-monitor-main
 
