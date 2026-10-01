@@ -40,7 +40,7 @@
 | 대시보드 예측값·혼잡 등급 카드 | D1 (프론트엔드) | 미구현 | |
 | 대시보드 CSV 배치 전송, Production 버전 표기 | D2 (프론트엔드) | 미구현 | 업로드·드리프트 시뮬레이션·재학습 로그 카드는 스켈레톤에 있음 |
 | Docker 컨테이너 재현 | C | 미확인 | TODO 1 구현 전에는 기동 실패 예상 (2번 참고) |
-| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 미실행 | 본 레포 코드로는 미실행. 사전 실험은 5번 참고 |
+| 통합 데모 (업로드 → 학습 → 예측 → 드리프트 → 재학습 → 재배포) | E | 미실행 (`main`) / 브랜치 실측 | `main` 코드로는 미실행. `exp/clean-cancellation`에서 서버 경유 한 바퀴 실측 — 드리프트 → v2 → 반등 → v3 → 게이트 실패 → 롤백 v2 (3번, 5번) |
 
 ---
 
@@ -395,23 +395,27 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 
 | 항목 | 값 | 위치 |
 |---|---|---|
-| 학습 데이터 | 제주공항 일별 여객 2023-01-01 ~ 2025-10-31, 1,035일 | `data/jeju_airport_arrivals.csv` |
-| 드리프트 시연 데이터 | 2025-01-09 ~ 2025-02-18, 41일 (폭설 결항일 17,093명·6,088명 포함) | `data/jeju_drift_batch_41rows.csv` |
-| 도착 여객 평균 / 중앙값 | 37,218명 / 37,820명 | `data/README.md` |
-| 도착 여객 표준편차 | 4,413명 | `data/README.md` |
-| 도착 여객 최소 / 최대 | 1,042명 / 46,954명 | `data/README.md` |
-| 사분위 Q1 / Q3 | 34,962명 / 40,177명 | `data/README.md` |
-| 일별 변화율 표준편차 | 19.6% (전체) / 8.4% (2만 명 미만 결항일 제외) | `data/README.md` |
-| 전일값 복사 RMSE | 3,600명 | `data/README.md` |
+| 학습 데이터 | 제주공항 일별 여객 2023-01-01 ~ 2025-10-31, 1,035일. **브랜치: 도착 25,000명 미만 18일 보간** (`CANCEL_ARRIVALS`) | `data/jeju_airport_arrivals.csv`, `scripts/prepare_jeju_data.py` |
+| 이상치 시연 데이터 | 2025-01-09 ~ 2025-02-18, 41일 raw (폭설 결항일 17,093명·6,088명 포함) | `data/jeju_drift_batch_41rows.csv` |
+| 드리프트 시연 컷 (브랜치) | 학습 ≤2024-06-30 · 업로드 ≤01-21·02-25·03-18 · 배치 정상(2024-10-01~11-10) / 드리프트(12-12~01-21) / 확정(01-02~02-11) / 반등(01-16~02-25) / 롤백(02-06~03-18) — 배치는 raw, 학습 컷은 보간본 | `data/jeju_demo_drift_*.csv` 9개, `data/README.md` "드리프트 시연 순서" |
+| 도착 여객 평균 / 중앙값 | 37,425명 / 37,822명 (보간본 · raw 37,218 / 37,820) | `data/README.md` |
+| 도착 여객 표준편차 | 3,809명 (raw 4,413) | `data/README.md` |
+| 도착 여객 최소 / 최대 | 25,168명 / 46,954명 (raw 최소 1,042) | `data/README.md` |
+| 사분위 Q1 / Q3 | 35,049명 / 40,177명 | `data/README.md` |
+| 일별 변화율 표준편차 | 7.3% (raw 19.6%, raw 결항 제외 8.4%) | `data/README.md` |
+| 전일값 복사 RMSE | 2,523명 (raw 3,600) | `data/README.md` |
 | 배포 게이트 `RMSE_GATE` | 2,700명 | `serving_app/train_and_register.py`, `scripts/train_baseline_v1.py` |
-| 드리프트 임계값 `RMSE_THRESHOLD` | 2,700명 | `serving_app/monitoring/drift_detector.py` |
+| 드리프트 임계값 `RMSE_THRESHOLD` | 2,700명 (브랜치에선 구조 드리프트 알림 전용) | `serving_app/monitoring/drift_detector.py` |
 | 판정 윈도우 `WINDOW_SIZE` | 21건 | `serving_app/monitoring/drift_detector.py` |
+| 드리프트 bias 기준 `BIAS_THRESHOLD` (브랜치) | **500명** (`exp/drift-anomaly`에선 1,500) | `serving_app/monitoring/drift_detector.py` — `exp/clean-cancellation`, `main`에는 없음 |
+| 이상치 기준 `ANOMALY_THRESHOLD` (브랜치) | 하루 오차 10,000명 | `serving_app/monitoring/drift_detector.py` — 팀 결정 전 |
+| fine-tune epoch `FINE_TUNE_EPOCHS` (브랜치) | **3** (`main` 10) | `serving_app/train_and_register.py` — 2번 참고, 팀 합의 필요 |
 | 입력 시퀀스 길이 `SEQ_LEN` | 20일 | `data/features.py` |
 | 시뮬레이션 고정 출발 여객 `SIMULATED_DEPARTURES` | 37,000명 | `serving_app/routers/predict.py` |
 | MLflow 모델 이름 | `Airport_Arrivals_Predictor` | `serving_app/model_loader.py`, `serving_app/train_and_register.py` |
 
-- 결측 처리: 2023-01-24 (도착·출발 모두 0) 1건을 전날·다음날 평균으로 보간했다. 결항으로 급감한 날은 실제 값 그대로 둔다.
-- 팀 결정 대기: 드리프트 임계값 분리 여부, `batch-test`에 `departures` 전달 여부, 재학습 후 윈도우 초기화 (`docs/proposal/03_operations_design.md` 4번). 결정되면 여기에 날짜와 결론을 적는다.
+- 결측·결항 처리 (브랜치 `exp/clean-cancellation`): 도착 < 25,000인 날 18일(2023-01-24 결측 포함)을 양옆 가장 가까운 정상일 평균으로 보간한다. `main`은 2023-01-24 1건만 보간. 이유와 효과는 `data/README.md` "가공 규칙" — 결항일이 스케일러를 압축하고 MSE를 지배해 모델이 20일 이동평균으로 퇴화하던 것이 풀린다 (평상시 RMSE 2,415 → 1,807, 예측 표준편차 445 → 1,898). 시도했다 버린 것: 요일·공휴일·연휴 피처 (`exp/calendar-features`, 2,344 → 2,695로 악화), 학습 기간 축소, 로그 변환 등 데이터 변형 A~G 중 보간(B)만 효과.
+- 팀 결정 대기: 보간 규칙·bias 500·fine-tune 3 epoch의 `main` 반영, `batch-test`에 `departures` 전달 여부 (`docs/proposal/03_operations_design.md` 4번). 결정되면 여기에 날짜와 결론을 적는다.
 
 ### 측정값 (사전 실험, 2026-10-01, 임시 복사본, PC 1대, 1회 — 본 레포 코드 아님)
 
@@ -427,11 +431,12 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 | 평상시 하루 오차 (결항 제외) | 모델 2,275명(실제 출발) / 2,570명(고정 출발), 전일값 복사 2,502명 |
 | 학습에 안 쓰인 평상시 41일 배치 중 임계값 초과 비율 | 32% (고정 출발) / 13% (실제 출발) / 31% (전일값 복사) |
 
-통합 데모(본 레포 코드, 팀 PC): 미실행. 실행하면 순서·명령·결과를 여기에 적는다.
+통합 데모(본 레포 코드, 팀 PC): 미실행. 브랜치 `exp/clean-cancellation` 코드로는 임시 워크트리에서 한 바퀴 실측 (3번 "보간 데이터 실측", `data/README.md` 두 시연 순서). 실행: 워크트리에서 `MODEL_SOURCE=mlflow uvicorn serving_app.main:app --port 8011` → `/data/upload` → `python scripts/train_baseline_v1.py` → `python serving_app/train_and_register.py` → `/predict`, `/predict/batch-test` 순서 호출 (스크래치 `e2e_clean.py`).
 
 ### 트러블슈팅
 
-(아직 없음)
+- 2026-10-01 | 실험 | 시연 확인 스크립트에서 학습 서브프로세스가 0초 만에 끝나고 모델이 없음 | 원인: `subprocess.run(["python", ...])`이 venv가 아닌 시스템 Python(`C:\Python312`, tensorflow 없음)을 잡음 | 해결: `sys.executable`로 호출 | 팀 PC에서도 `python`이 venv를 가리키는지 (`.venv\Scripts\Activate.ps1`) 먼저 확인
+- 2026-10-01 | 실험 | 워크트리 `mlruns/`를 지워도 레지스트리 버전 번호가 v4부터 이어짐 | 원인: 레지스트리는 cwd의 `mlflow.db`(sqlite)에 있고 `mlruns/`는 아티팩트만 | 해결: `mlflow.db`도 함께 삭제 | 시연 PC에서 "v1부터" 보여주려면 `mlflow.db`, `mlruns/`, `data/uploads/*.csv`, `serving_app/models/*.keras|pkl`을 모두 비우고 시작
 
 ### 증빙
 
@@ -447,3 +452,4 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 
 - 2026-09-30 21:40 | 초기 작성 | 데이터와 상수 현재 값 기록 | 해당 없음 | main
 - 2026-10-01 | E | 섹션을 담당자별로 재편, 아키텍처·측정값·증빙을 섹션 안으로 이동, 사전 실험 수치 기록 | 해당 없음 | main
+- 2026-10-01 | 실험 | `prepare_jeju_data.py`에 결항일(도착 < 25,000) 보간 추가, `jeju_airport_arrivals.csv`·학습 컷 4개 재생성, 드리프트 시연 컷 재선정(배치 raw / 학습 보간본), `falsealarm` 배치를 `sep_oct`로 개명 | `python scripts/prepare_jeju_data.py` → 18일 보간, 1,035행. 기초 통계 보간본 기준으로 갱신. 루프 실측은 3번 | exp/clean-cancellation (main 미반영)

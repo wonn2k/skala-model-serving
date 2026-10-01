@@ -33,10 +33,13 @@
 CSV 형식: `Date,Arrivals,Departures` (일별, 단위: 명, UTF-8, 최소 41행).
 
 - `data/jeju_airport_arrivals.csv`는 **한국공항공사 제주공항 일별 여객 실데이터**
-  (2023-01-01 ~ 2025-10-31, 1,035일, 일평균 도착 약 37,200명)입니다. 원자료·가공 규칙·기초
+  (2023-01-01 ~ 2025-10-31, 1,035일, 일평균 도착 약 37,400명)입니다. 학습용이라 폭설·강풍
+  결항일(도착 25,000명 미만, 18일)은 양옆 평균으로 보간돼 있습니다 — 결항일을 그대로 두면 모델이
+  20일 이동평균으로 퇴화합니다 (평상시 RMSE 2,415 → 보간 후 1,807). 원자료·가공 규칙·기초
   통계는 [`data/README.md`](data/README.md), 변환 스크립트는 `scripts/prepare_jeju_data.py`.
-- `data/jeju_drift_batch_41rows.csv`는 폭설 결항일(2025-02-07, 6,088명)이 포함된 41일 실데이터
-  슬라이스로, Day3 드리프트 주입 시연에 사용합니다.
+- `data/jeju_drift_batch_41rows.csv`는 폭설 결항일(2025-02-07, 6,088명)이 포함된 41일 raw
+  슬라이스로, Day3 이상치 탐지 시연에 사용합니다. 드리프트·롤백 시연 컷(`jeju_demo_drift_*.csv`)과
+  확인된 값은 `data/README.md` "드리프트 시연 순서".
 - 서버를 띄운 뒤 대시보드(`http://localhost:8000/`)의 업로드 카드에서 파일을 올리면
   `data/uploads/`에 타임스탬프 파일명으로 쌓이고, 학습·시뮬레이션 코드는 항상 **가장
   최근에 업로드된 파일**을 사용합니다(`data/storage.py`의 `latest_upload()`).
@@ -51,8 +54,11 @@ Input (20, 2)  ->  LSTM(32, return_sequences=True)  ->  LSTM(32, return_sequence
                ->  LSTM(16)  ->  Dense(16, relu)  ->  Dense(1)
 ```
 
-Day3에서 드리프트가 감지되면 처음부터 다시 학습하지 않고, 전체 데이터로 학습된
-**Production 가중치에서 이어서(warm start) 최근 21일로 10 epoch fine-tuning**합니다.
+Day3에서 드리프트(최근 21일 평균 오차 |bias| > 500명, 하루 오차 10,000명 초과는 이상치로 제외)가
+감지되면 처음부터 다시 학습하지 않고, 전체 데이터로 학습된
+**Production 가중치에서 이어서(warm start) 최근 21일로 3 epoch fine-tuning**합니다 (원본 스켈레톤 10 epoch;
+보간 데이터에서는 많이 돌릴수록 최근 3주에 과적합해 게이트 실패가 늘어 3으로 줄임). 재학습이 게이트(RMSE 2,700)를
+통과하면 승격, 승격 직후 다음 판정에서 또 드리프트인데 재학습이 게이트에 실패하면 이전 버전으로 롤백합니다.
 `serving_app/train_and_register.py`의 `train_and_register()`(Day2, scratch)와
 `fine_tune()`(Day3)이 이 구분입니다. 스케일러(`scaler.pkl`)는 Day1에서 한 번 fit한 뒤
 Day1~3 내내 재사용합니다.
@@ -72,7 +78,7 @@ Day1~3 내내 재사용합니다.
 │   ├── uploads/                     # 업로드된 CSV가 쌓이는 곳 (시작 시 비어 있음, git 제외)
 │   └── features.py                  # 시퀀스 빌더(SEQ_LEN=20) + AirportScaler (전 Day 공용)
 ├── scripts/
-│   ├── prepare_jeju_data.py         # 원자료 -> 업로드 형식 변환 (결측일 보간)
+│   ├── prepare_jeju_data.py         # 원자료 -> 업로드 형식 변환 (결항일 <25,000 보간)
 │   ├── train_baseline_v1.py         # Day1 사전 준비: MLflow 없이 로컬 baseline LSTM 생성
 │   └── simulate_drift.py            # Day3: 정상/드리프트 배치 생성 + 서버로 주입
 └── serving_app/
