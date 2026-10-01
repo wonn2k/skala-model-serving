@@ -6,7 +6,8 @@ Day3: 드리프트 감지 후 Production 가중치에서 이어서 학습하는 
     1) 공항 도착 여객 데이터로 base 모델 학습(100 epoch) -> RMSE 확인 (게이트 미달 가능)
     2) 게이트(RMSE ≤ 2,700명) 통과 시 Production으로 승격
     3) (Day3) 드리프트 감지 시 Production 가중치에서 warm-start -> 최근 3주(21일) 데이터로
-       10 epoch만 fine-tuning (처음부터 다시 학습하지 않음 - 21일치로는 스크래치 학습이 불안정)
+       짧게(FINE_TUNE_EPOCHS) fine-tuning (처음부터 다시 학습하지 않음 - 21일치로는
+       스크래치 학습이 불안정)
 
 실행:
     (대시보드에서 공항 도착 여객 CSV를 먼저 업로드하세요 - data/jeju_airport_arrivals.csv가 예시입니다)
@@ -39,7 +40,9 @@ MODEL_NAME = "Airport_Arrivals_Predictor"
 SCALER_PATH = "serving_app/models/scaler.pkl"
 BASE_EPOCHS = 100  # 3층 LSTM + 3년치 데이터 기준, RMSE가 안정적으로 게이트 아래로 수렴하는 지점
 FINE_TUNE_EPOCHS = 3  # 많이 돌릴수록 최근 3주에 과적합해 게이트 실패가 늘고 RMSE가 나빠진다 (실험 6).
-# B의 BIAS_THRESHOLD(500)가 3 epoch를 전제로 고른 값이라 둘은 같이 움직인다.
+# 3/10/30 epoch로 돌려 게이트 실패 3/8/16회. main에 이미 들어간 B의 BIAS_THRESHOLD(500)가
+# 3 epoch를 전제로 고른 값이고(drift_detector.py 주석에 명시), 10으로 두면 그 전제가 깨져
+# 재학습이 게이트에서 반복 실패한다. 둘은 같이 움직인다 - 되돌릴 때도 함께 되돌려야 한다.
 FINE_TUNE_LR = 1e-4  # base 학습(1e-3)보다 낮은 학습률로 살짝만 갱신
 
 

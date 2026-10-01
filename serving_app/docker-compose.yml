@@ -12,3 +12,11 @@ services:
       context: ..
       dockerfile: serving_app/Dockerfile
     ports: ["8000:8000"]
+    # Dockerfile의 기본값은 MODEL_SOURCE=mlflow + LOADING_MODE=eager다. 그 조합은 기동할 때
+    # model_loader._load_from_mlflow()를 바로 부르는데, 이 함수는 아직 TODO(A 담당)라서
+    # NotImplementedError로 컨테이너가 바로 죽는다. 그때까지 로컬 모델로 띄울 수 있게
+    # 통로를 열어 둔다 (이미지 빌드 시점에 학습한 .keras가 이미 들어 있다).
+    #   MODEL_SOURCE=local docker compose -f serving_app/docker-compose.yml up
+    environment:
+      MODEL_SOURCE: ${MODEL_SOURCE:-mlflow}
+      LOADING_MODE: ${LOADING_MODE:-eager}
