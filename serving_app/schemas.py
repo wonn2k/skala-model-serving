@@ -7,7 +7,7 @@ LSTM은 한 시점의 값이 아니라 최근 SEQ_LEN(20)일의 흐름을 입력
 서빙 시점 입력 검증이 학습 시점 피처(data/features.py)와 어긋나지 않도록
 길이(SEQ_LEN)와 값 범위(ge=0)를 스키마 단에서 강제합니다.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from data.features import SEQ_LEN
 
@@ -37,8 +37,19 @@ class PredictResponse(BaseModel):
 class BatchTestRequest(BaseModel):
     # Day3 드리프트 시뮬레이션에서 사용 (scripts/simulate_drift.py 참고)
     # SEQ_LEN + N 개의 연속된 일별 도착 여객 수를 보내면, 서버가 내부적으로 슬라이딩 윈도우로
-    # 잘라 여러 건을 연속 예측한다. (출발 여객 수는 시뮬레이션이므로 고정값을 사용)
+    # 잘라 여러 건을 연속 예측한다.
+    # departures는 선택 항목 - 실제 데이터(CSV) 배치는 같은 날짜의 출발 여객 수를 함께 보내고,
+    # 랜덤워크 시뮬레이션처럼 출발 여객이 없는 배치는 생략한다 (서버가 고정값으로 채운다).
     arrivals: list[float] = Field(..., min_length=SEQ_LEN + 1)
+    departures: list[float] | None = Field(
+        None, description="arrivals와 같은 날짜·같은 길이의 일별 출발 여객 수. 생략하면 고정값 사용"
+    )
+
+    @model_validator(mode="after")
+    def _departures_match_arrivals(self):
+        if self.departures is not None and len(self.departures) != len(self.arrivals):
+            raise ValueError("departures는 arrivals와 길이가 같아야 합니다")
+        return self
 
 
 class BatchTestResponse(BaseModel):
