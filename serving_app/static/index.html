@@ -71,6 +71,22 @@
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
 
+  /* ---------- Forecast (D1) ---------- */
+  .fc-main { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .fc-value { font-size: 2rem; font-weight: 800; font-family: var(--mono); }
+  .fc-unit { font-size: 1rem; color: var(--muted); font-weight: 600; }
+  .fc-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .fc-trend { margin-top: 16px; }
+  .fc-trend-title { font-size: 0.74rem; color: var(--muted); margin-bottom: 6px; }
+  .fc-bars { display: flex; align-items: flex-end; gap: 3px; height: 110px; }
+  .fc-bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; min-width: 0; }
+  .fc-bar { background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; opacity: 0.75; }
+  .fc-bar-col:hover .fc-bar { opacity: 1; }
+  .fc-bar-col:last-child .fc-bar { opacity: 1; }
+  .fc-labels { display: flex; gap: 3px; margin-top: 4px; }
+  .fc-label { flex: 1; min-width: 0; text-align: center; font-size: 0.6rem; color: var(--faint); font-family: var(--mono); overflow: hidden; white-space: nowrap; }
+  .fc-hover { font-size: 0.74rem; color: var(--muted); margin-top: 6px; font-family: var(--mono); min-height: 1.1em; }
+
   /* ---------- Upload ---------- */
   .upload-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   input[type="file"] {
@@ -127,6 +143,24 @@
 </div>
 
 <div class="page">
+
+  <!-- ================= 내일 도착 여객 예측 (D1) ================= -->
+  <div class="card" id="forecast-card">
+    <div class="section-head-row">
+      <div class="section-head">
+        <h2>내일 도착 여객 예측 · 혼잡 등급</h2>
+        <p>
+          최근 20일(오래된 날 → 최근 날)을 <code>POST /predict</code>에 보내 기준일 다음날의 도착 여객 수를 예측합니다.
+          등급: 34,962명 미만 여유 / 40,177명 초과 혼잡 / 그 사이 보통 (<code>data/README.md</code> 사분위 Q1·Q3).
+        </p>
+      </div>
+      <div class="pipeline-meta">
+        <button class="btn secondary" id="forecast-refresh" onclick="loadForecast()">새로고침</button>
+      </div>
+    </div>
+    <div id="forecast-body"></div>
+    <div id="forecast-error" class="result-box"></div>
+  </div>
 
   <!-- ================= 데이터 업로드 ================= -->
   <div class="card">
@@ -234,6 +268,9 @@
 const SEQ_LEN = 20;
 const WINDOW_SIZE = 21;
 const RMSE_THRESHOLD = 2700;
+// 혼잡 등급 경계(명) - data/README.md "사분위 Q1 / Q3" 행(34,962 / 40,177)과 같은 값
+const CONGESTION_HIGH = 40177; // Q3: 초과면 혼잡
+const CONGESTION_LOW = 34962;  // Q1: 미만이면 여유, 그 사이는 보통
 
 let lastPipelineRun = null; // { driftCheck, clientRmse, ts }
 
@@ -296,6 +333,156 @@ function showResult(el, obj, isError = false) {
   el.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
 }
 
+/* ===================== 내일 도착 여객 예측 (D1) ===================== */
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function fmtInt(n) { return Math.round(n).toLocaleString("ko-KR"); }
+function nextDate(ymd) {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  if (isNaN(d)) return null;
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+// 경계값 자체는 보통: CONGESTION_HIGH 초과만 혼잡, CONGESTION_LOW 미만만 여유
+function congestionLevel(n) {
+  if (n > CONGESTION_HIGH) return { label: "혼잡", cls: "err" };
+  if (n < CONGESTION_LOW) return { label: "여유", cls: "ok" };
+  return { label: "보통", cls: "warn" };
+}
+// schemas.py DailyPoint가 int라서 소수/문자열이면 422가 난다 → 숫자로 바꾼 뒤 정수로 보낸다
+function toSequence(rows) {
+  return rows.map((r, i) => {
+    const arrivals = Number(r.arrivals), departures = Number(r.departures);
+    if (!Number.isFinite(arrivals) || !Number.isFinite(departures)) {
+      throw new Error(`입력 ${i + 1}번째 날(${r.date ?? "?"})의 값이 숫자가 아닙니다`);
+    }
+    return { arrivals: Math.round(arrivals), departures: Math.round(departures) };
+  });
+}
+// FastAPI 422 detail([{loc, msg, type}, ...])을 한 줄씩 요약
+function summarize422(detail) {
+  if (!Array.isArray(detail)) return typeof detail === "string" ? detail : JSON.stringify(detail);
+  const lines = detail.slice(0, 3).map((d) => `${(d.loc || []).join(".")}: ${d.msg}`);
+  if (detail.length > 3) lines.push(`외 ${detail.length - 3}건`);
+  return lines.join(" / ");
+}
+function renderTrend(rows) {
+  const vals = rows.map((r) => Number(r.arrivals));
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const span = max - min || 1;
+  // 최솟값도 막대가 보이도록 높이를 15%~100% 범위로 정규화
+  const bars = rows.map((r, i) => {
+    const h = 15 + ((vals[i] - min) / span) * 85;
+    const tip = `${r.date ?? `${i + 1}일째`} · ${fmtInt(vals[i])}명`;
+    return `<div class="fc-bar-col" title="${escapeHtml(tip)}" onmouseenter="document.getElementById('fc-hover').textContent=this.title">
+      <div class="fc-bar" style="height:${h.toFixed(1)}%"></div></div>`;
+  }).join("");
+  const labels = rows.map((r) => `<div class="fc-label">${escapeHtml((r.date || "").slice(5))}</div>`).join("");
+  return `
+    <div class="fc-trend">
+      <div class="fc-trend-title">최근 ${rows.length}일 도착 여객 추이 (최소 ${fmtInt(min)}명 · 최대 ${fmtInt(max)}명)</div>
+      <div class="fc-bars">${bars}</div>
+      <div class="fc-labels">${labels}</div>
+      <div class="fc-hover" id="fc-hover">막대에 마우스를 올리면 날짜와 값이 보입니다</div>
+    </div>`;
+}
+function renderForecast(state, p = {}) {
+  const body = document.getElementById("forecast-body");
+  const errBox = document.getElementById("forecast-error");
+  errBox.classList.remove("show");
+
+  if (state === "need-upload") {
+    body.innerHTML = `<span class="pill warn"><span class="dot"></span>데이터를 먼저 업로드하세요</span>`;
+    return;
+  }
+  if (state === "loading") {
+    body.innerHTML = `<span class="pill neutral"><span class="dot"></span>예측 요청 중…</span>`;
+    return;
+  }
+  const baseDate = p.rows?.length ? p.rows[p.rows.length - 1].date : null;
+  const dateMeta = baseDate
+    ? `<span class="pill neutral">기준일 ${escapeHtml(baseDate)} → 예측일 ${escapeHtml(nextDate(baseDate) ?? "다음날")}</span>`
+    : "";
+  if (state === "error") {
+    body.innerHTML = `
+      <span class="pill err"><span class="dot"></span>${escapeHtml(p.title)}</span>
+      <div class="fc-meta">${dateMeta}${p.ms != null ? `<span class="pill neutral">왕복 ${p.ms.toFixed(0)} ms</span>` : ""}</div>`;
+    if (p.raw != null) showResult(errBox, p.raw, true);
+    return;
+  }
+  // success
+  const r = p.data;
+  const level = congestionLevel(r.predicted_arrivals);
+  body.innerHTML = `
+    <div class="fc-main">
+      <span class="fc-value">${fmtInt(r.predicted_arrivals)}<span class="fc-unit"> 명</span></span>
+      <span class="pill ${level.cls}"><span class="dot"></span>${level.label}</span>
+    </div>
+    <div class="fc-meta">
+      ${dateMeta}
+      <span class="pill neutral">model_version: ${escapeHtml(r.model_version)}</span>
+      <span class="pill neutral">model_registry_version: ${escapeHtml(r.model_registry_version ?? "null")}</span>
+      <span class="pill neutral">왕복 ${p.ms.toFixed(0)} ms</span>
+    </div>
+    ${renderTrend(p.rows)}`;
+}
+async function loadForecast() {
+  const btn = document.getElementById("forecast-refresh");
+  btn.disabled = true;
+  try {
+    let status;
+    try {
+      const st = await getJSON("/data/status");
+      if (!st.ok || !st.data) {
+        renderForecast("error", { title: `GET /data/status 실패 (${st.status})`, raw: st.data });
+        return;
+      }
+      status = st.data;
+    } catch (e) {
+      renderForecast("error", { title: "네트워크 오류: GET /data/status", raw: e.message });
+      return;
+    }
+    if (!status.exists) { renderForecast("need-upload"); return; }
+
+    // 입력 20일은 C의 GET /data/status recent(오래된 날 → 최근 날)를 그대로 쓴다
+    const rows = status.recent;
+    if (!Array.isArray(rows) || rows.length !== SEQ_LEN) {
+      renderForecast("error", { title: `GET /data/status의 recent가 ${SEQ_LEN}행 배열이 아닙니다`, raw: status });
+      return;
+    }
+    renderForecast("loading");
+
+    let sequence;
+    try { sequence = toSequence(rows); }
+    catch (e) { renderForecast("error", { title: "입력 변환 실패", raw: e.message, rows }); return; }
+
+    const t0 = performance.now();
+    let res, data;
+    try {
+      res = await fetch("/predict", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sequence }),
+      });
+      data = await safeJson(res);
+    } catch (e) {
+      renderForecast("error", { title: "네트워크 오류: POST /predict", raw: e.message, rows });
+      return;
+    }
+    const ms = performance.now() - t0;
+
+    if (res.status === 422) {
+      renderForecast("error", { title: `422 입력 검증 오류: ${summarize422(data.detail)}`, raw: data, rows, ms });
+    } else if (!res.ok) {
+      const reason = res.status >= 500 ? "서버 오류 (모델 파일 없음 등)" : "요청 실패";
+      renderForecast("error", { title: `${res.status} ${reason}`, raw: data.__raw ?? data, rows, ms });
+    } else {
+      renderForecast("success", { data, rows, ms });
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ===================== 데이터 업로드 ===================== */
 async function uploadFile() {
   const input = document.getElementById("upload-input");
@@ -315,6 +502,7 @@ async function uploadFile() {
       return;
     }
     statusEl.innerHTML = `<span class="pill ok"><span class="dot"></span>업로드 완료: ${data.filename} (${data.rows}행)</span>`;
+    loadForecast();
   } catch (e) {
     statusEl.innerHTML = `<span class="pill err"><span class="dot"></span>요청 실패: ${e.message}</span>`;
   }
@@ -637,6 +825,7 @@ async function sendBatch(kind, csvArrivals = null) {
 /* ===================== 초기화 ===================== */
 async function init() {
   renderPipeline();
+  loadForecast(); // D1 예측은 모니터 조회를 기다리지 않는다.
   await refreshMonitorPanels();
   setInterval(() => { if (!document.hidden) refreshMonitorPanels(); }, 5000);
 }
