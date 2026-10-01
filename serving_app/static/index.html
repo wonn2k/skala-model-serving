@@ -135,7 +135,8 @@
   .chart .hcol .hv { opacity: 0; transition: opacity 0.12s; }
   .chart .hcol:hover .hv { opacity: 1; }
   .chart-hover { font-size: 0.74rem; color: var(--muted); min-height: 1.1em; margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .cmp-source { font-size: 0.74rem; color: var(--muted); margin: -4px 0 10px; overflow-wrap: anywhere; }
+  .cmp-col h3 > span:first-child { overflow-wrap: anywhere; }
+  .cmp-col h3 .ts { flex-shrink: 0; }
   .slot-choice { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 0.82rem; color: var(--muted); }
   .slot-choice label { display: inline-flex; gap: 5px; align-items: center; color: var(--text); cursor: pointer; }
   .raw-json { margin-top: 12px; }
@@ -257,8 +258,8 @@
       </div>
       <div class="slot-choice" role="radiogroup" aria-label="CSV 결과를 넣을 비교 칸">
         <span>비교 칸:</span>
-        <label><input type="radio" name="csv-slot" value="left" checked /> 왼쪽 (기준)</label>
-        <label><input type="radio" name="csv-slot" value="right" /> 오른쪽 (비교)</label>
+        <label><input type="radio" name="csv-slot" value="left" checked /> 왼쪽 칸</label>
+        <label><input type="radio" name="csv-slot" value="right" /> 오른쪽 칸</label>
       </div>
       <p id="batch-csv-summary" role="status" style="margin-top:10px;">파일을 선택하면 기간과 행 수를 확인할 수 있습니다.</p>
     </div>
@@ -346,8 +347,8 @@ let lastPipelineRun = null; // { driftCheck, clientRmse, ts }
 // 랜덤 정상 → 왼쪽, 랜덤 드리프트 → 오른쪽, CSV → 선택한 칸
 const lastBatchBySlot = { left: null, right: null };
 const SLOT_META = {
-  left: { title: "왼쪽 (기준)", short: "왼쪽", color: "var(--chart-teal)" },
-  right: { title: "오른쪽 (비교)", short: "오른쪽", color: "var(--chart-coral)" },
+  left: { color: "var(--chart-teal)" },
+  right: { color: "var(--chart-coral)" },
 };
 
 const NORMAL_SIGMA = 0.012;
@@ -930,7 +931,7 @@ function compareCharts(kind, st, ext) {
 }
 
 // 요약 가로 막대: 막대는 0에서 값까지. {x, width, y, height}를 돌려준다
-const HBAR_BOX = { w: 440, left: 72, right: 76, top: 22, row: 30, barH: 10 };
+const HBAR_BOX = { w: 440, left: 112, right: 76, top: 22, row: 30, barH: 10 };
 function hbarRects(values, domain, box = HBAR_BOX) {
   const x = scaleLinear(domain, [box.left, box.w - box.right]);
   const x0 = x(Math.max(domain[0], 0));
@@ -973,23 +974,23 @@ function summaryDomains(stats) {
 }
 function renderCompareSummary(stats) {
   const el = document.getElementById("cmp-summary");
-  if (!stats.normal && !stats.drift) {
-    el.innerHTML = `<div class="cmp-empty" style="padding:10px 4px;">배치를 보내면 왼쪽(기준)·오른쪽(비교) 칸에 결과가 나란히 놓입니다. 랜덤 정상 → 왼쪽, 랜덤 드리프트 → 오른쪽, CSV → 선택한 칸</div>`;
+  if (!stats.left && !stats.right) {
+    el.innerHTML = `<div class="cmp-empty" style="padding:10px 4px;">배치를 보내면 두 칸에 결과가 나란히 놓입니다. 랜덤 정상 → 왼쪽 칸, 랜덤 드리프트 → 오른쪽 칸, CSV → 선택한 칸</div>`;
     return;
   }
   const d = summaryDomains(stats);
-  const row = (k, label, color, key) => ({ label, color, value: stats[k] ? stats[k][key] : null });
+  const row = (k, key) => ({ label: lastBatchBySlot[k] ? lastBatchBySlot[k].short : "-", color: SLOT_META[k].color, value: stats[k] ? stats[k][key] : null });
   el.innerHTML = `
     <div class="cmp-summary-grid">
       <div class="summary-panel">
         <div class="chart-title"><b>배치 RMSE</b> <span class="sub">클라이언트 계산 · 보낸 값 vs 예측</span></div>
-        ${svgHBars({ items: [row("left", "왼쪽", SLOT_META.left.color, "rmse"), row("right", "오른쪽", SLOT_META.right.color, "rmse")],
+        ${svgHBars({ items: [row("left", "rmse"), row("right", "rmse")],
           domain: d.rmse, refs: [{ value: RMSE_THRESHOLD, label: fmtInt(RMSE_THRESHOLD) }], fmt: (v) => `${fmtInt(v)}명` })}
         <div class="summary-note">점선 = RMSE_THRESHOLD ${fmtInt(RMSE_THRESHOLD)}명 (구조 변화 경고·배포 게이트 기준)</div>
       </div>
       <div class="summary-panel">
         <div class="chart-title"><b>배치 bias</b> <span class="sub">클라이언트 계산 · 실제 − 예측 평균</span></div>
-        ${svgHBars({ items: [row("left", "왼쪽", SLOT_META.left.color, "bias"), row("right", "오른쪽", SLOT_META.right.color, "bias")],
+        ${svgHBars({ items: [row("left", "bias"), row("right", "bias")],
           domain: d.bias, refs: [{ value: -BIAS_THRESHOLD, label: fmtSigned(-BIAS_THRESHOLD) }, { value: BIAS_THRESHOLD, label: fmtSigned(BIAS_THRESHOLD) }],
           fmt: (v) => `${fmtSigned(v)}명` })}
         <div class="summary-note">점선 = ±BIAS_THRESHOLD ${fmtInt(BIAS_THRESHOLD)}명 (넘으면 재학습) · 가운데 실선 = 0</div>
@@ -1009,10 +1010,9 @@ function compareExtents(statsList) {
 function renderCompareColumn(slot, entry, st, ext) {
   const meta = SLOT_META[slot];
   const dot = `<span class="kind-dot" style="background:${meta.color}"></span>`;
-  if (!entry) return `<h3><span>${dot}${meta.title}</span></h3><div class="cmp-empty">아직 전송 안 함</div>`;
+  if (!entry) return `<div class="cmp-empty">아직 전송 안 함</div>`;
   const ts = new Date(entry.ts * 1000).toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" });
-  return `<h3><span>${dot}${meta.title}</span><span class="ts">${ts} 전송</span></h3>
-    <div class="cmp-source">${escapeHtml(entry.source)}</div>
+  return `<h3><span>${dot}${escapeHtml(entry.source)}</span><span class="ts">${ts} 전송</span></h3>
     ${metricTiles(entry, st)}
     ${compareCharts(slot, st, ext)}`;
 }
@@ -1027,12 +1027,15 @@ function renderCompare() {
 }
 // 보낸 배치가 들어갈 칸과 출처 표시. 전송 시작 시점에 정한다 (응답 사이에 파일·선택이 바뀌어도 섞이지 않게)
 function batchTarget(kind) {
-  if (kind === "normal") return { slot: "left", source: "랜덤 정상" };
-  if (kind === "drift") return { slot: "right", source: "랜덤 드리프트" };
+  if (kind === "normal") return { slot: "left", source: "랜덤 정상", short: "랜덤 정상" };
+  if (kind === "drift") return { slot: "right", source: "랜덤 드리프트", short: "랜덤 드리프트" };
   const picked = document.querySelector('input[name="csv-slot"]:checked');
   const file = document.getElementById("batch-csv-input").files[0];
   const period = csvBatch ? ` · ${csvBatch.start} ~ ${csvBatch.end}` : "";
-  return { slot: picked && picked.value === "right" ? "right" : "left", source: `CSV · ${file ? file.name : "(파일명 없음)"}${period}` };
+  // 요약 행에는 파일명 끝부분만 (예: …drift_41rows) - 시연 파일 한 쌍이 앞부분이 같아서
+  const stem = file ? file.name.replace(/\.csv$/i, "") : "CSV";
+  const short = stem.length > 12 ? `…${stem.slice(-11)}` : stem;
+  return { slot: picked && picked.value === "right" ? "right" : "left", source: `CSV · ${file ? file.name : "(파일명 없음)"}${period}`, short };
 }
 
 /* ===================== CSV 배치 입력 (D2) ===================== */
@@ -1159,7 +1162,7 @@ async function sendBatch(kind, csvArrivals = null) {
     renderPipeline();
 
     const check = data.drift_check || {};
-    lastBatchBySlot[target.slot] = { arrivals, predictions: data.predictions || [], drift_check: check, ts: Date.now() / 1000, source: target.source };
+    lastBatchBySlot[target.slot] = { arrivals, predictions: data.predictions || [], drift_check: check, ts: Date.now() / 1000, source: target.source, short: target.short };
     renderCompare();
     const labels = {
       ok: ["ok", "정상 (재학습 없음)"],
