@@ -155,7 +155,6 @@
         </p>
       </div>
       <div class="pipeline-meta">
-        <span id="forecast-source"></span>
         <button class="btn secondary" id="forecast-refresh" onclick="loadForecast()">새로고침</button>
       </div>
     </div>
@@ -251,30 +250,6 @@ const RMSE_THRESHOLD = 2700;
 // 혼잡 등급 경계(명) - data/README.md "사분위 Q1 / Q3" 행(34,962 / 40,177)과 같은 값
 const CONGESTION_HIGH = 40177; // Q3: 초과면 혼잡
 const CONGESTION_LOW = 34962;  // Q1: 미만이면 여유, 그 사이는 보통
-// 임시 입력: data/jeju_airport_arrivals.csv 마지막 20행.
-// GET /data/status에 recent가 생기면 resolveRecent()가 자동으로 그쪽을 쓰므로, 그때 이 상수만 지우면 된다.
-const FALLBACK_RECENT = [
-  { date: "2025-10-12", arrivals: 33285, departures: 44836 },
-  { date: "2025-10-13", arrivals: 34700, departures: 45241 },
-  { date: "2025-10-14", arrivals: 31697, departures: 37147 },
-  { date: "2025-10-15", arrivals: 37946, departures: 33460 },
-  { date: "2025-10-16", arrivals: 38737, departures: 35882 },
-  { date: "2025-10-17", arrivals: 42341, departures: 41464 },
-  { date: "2025-10-18", arrivals: 41071, departures: 39875 },
-  { date: "2025-10-19", arrivals: 41581, departures: 43337 },
-  { date: "2025-10-20", arrivals: 43704, departures: 39742 },
-  { date: "2025-10-21", arrivals: 39236, departures: 36674 },
-  { date: "2025-10-22", arrivals: 40823, departures: 38703 },
-  { date: "2025-10-23", arrivals: 43028, departures: 41254 },
-  { date: "2025-10-24", arrivals: 45220, departures: 44632 },
-  { date: "2025-10-25", arrivals: 43605, departures: 45288 },
-  { date: "2025-10-26", arrivals: 39737, departures: 41802 },
-  { date: "2025-10-27", arrivals: 41146, departures: 43695 },
-  { date: "2025-10-28", arrivals: 37058, departures: 38666 },
-  { date: "2025-10-29", arrivals: 39266, departures: 37772 },
-  { date: "2025-10-30", arrivals: 41716, departures: 40314 },
-  { date: "2025-10-31", arrivals: 42323, departures: 42950 },
-];
 
 let lastPipelineRun = null; // { driftCheck, clientRmse, ts }
 
@@ -354,13 +329,6 @@ function congestionLevel(n) {
   if (n < CONGESTION_LOW) return { label: "여유", cls: "ok" };
   return { label: "보통", cls: "warn" };
 }
-// recent 출처 분기: 서버(C)의 GET /data/status recent가 있으면 그것, 없으면 FALLBACK_RECENT
-function resolveRecent(status) {
-  if (status && Array.isArray(status.recent) && status.recent.length === SEQ_LEN) {
-    return { rows: status.recent, source: "api" };
-  }
-  return { rows: FALLBACK_RECENT, source: "fallback" };
-}
 // schemas.py DailyPoint가 int라서 소수/문자열이면 422가 난다 → 숫자로 바꾼 뒤 정수로 보낸다
 function toSequence(rows) {
   return rows.map((r, i) => {
@@ -401,11 +369,7 @@ function renderTrend(rows) {
 function renderForecast(state, p = {}) {
   const body = document.getElementById("forecast-body");
   const errBox = document.getElementById("forecast-error");
-  const srcEl = document.getElementById("forecast-source");
   errBox.classList.remove("show");
-  srcEl.innerHTML = p.source === "fallback"
-    ? `<span class="pill warn">임시 데이터(CSV 마지막 20행)</span>`
-    : p.source === "api" ? `<span class="pill neutral">GET /data/status recent</span>` : "";
 
   if (state === "need-upload") {
     body.innerHTML = `<span class="pill warn"><span class="dot"></span>데이터를 먼저 업로드하세요</span>`;
@@ -460,12 +424,17 @@ async function loadForecast() {
     }
     if (!status.exists) { renderForecast("need-upload"); return; }
 
-    const { rows, source } = resolveRecent(status);
-    renderForecast("loading", { source });
+    // 입력 20일은 C의 GET /data/status recent(오래된 날 → 최근 날)를 그대로 쓴다
+    const rows = status.recent;
+    if (!Array.isArray(rows) || rows.length !== SEQ_LEN) {
+      renderForecast("error", { title: `GET /data/status의 recent가 ${SEQ_LEN}행 배열이 아닙니다`, raw: status });
+      return;
+    }
+    renderForecast("loading");
 
     let sequence;
     try { sequence = toSequence(rows); }
-    catch (e) { renderForecast("error", { title: "입력 변환 실패", raw: e.message, rows, source }); return; }
+    catch (e) { renderForecast("error", { title: "입력 변환 실패", raw: e.message, rows }); return; }
 
     const t0 = performance.now();
     let res, data;
@@ -475,18 +444,18 @@ async function loadForecast() {
       });
       data = await safeJson(res);
     } catch (e) {
-      renderForecast("error", { title: "네트워크 오류: POST /predict", raw: e.message, rows, source });
+      renderForecast("error", { title: "네트워크 오류: POST /predict", raw: e.message, rows });
       return;
     }
     const ms = performance.now() - t0;
 
     if (res.status === 422) {
-      renderForecast("error", { title: `422 입력 검증 오류: ${summarize422(data.detail)}`, raw: data, rows, source, ms });
+      renderForecast("error", { title: `422 입력 검증 오류: ${summarize422(data.detail)}`, raw: data, rows, ms });
     } else if (!res.ok) {
       const reason = res.status >= 500 ? "서버 오류 (모델 파일 없음 등)" : "요청 실패";
-      renderForecast("error", { title: `${res.status} ${reason}`, raw: data.__raw ?? data, rows, source, ms });
+      renderForecast("error", { title: `${res.status} ${reason}`, raw: data.__raw ?? data, rows, ms });
     } else {
-      renderForecast("success", { data, rows, source, ms });
+      renderForecast("success", { data, rows, ms });
     }
   } finally {
     btn.disabled = false;
