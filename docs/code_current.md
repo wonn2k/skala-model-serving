@@ -364,7 +364,7 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 - **역할**: 운영 담당자가 보는 화면 하나. 위쪽은 "내일 도착 여객 예측 N명 · 등급"(D1), 아래쪽은 운영 체계가 돌아가는 것을 보여주는 배치 전송·재학습 로그·모델 버전(D2).
 - **구성 요소**
   - [D1] 예측 카드: 예측값, 날짜, 혼잡 등급, 최근 20일 추이(표 또는 간단한 차트), 새로고침 버튼.
-  - [D2] 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. 여기에 **CSV 배치 전송**(`data/jeju_drift_batch_41rows.csv` 등 41행 파일을 읽어 `arrivals` 배열로 전송) 추가.
+  - [D2] 드리프트 시뮬레이션 카드(스켈레톤): 랜덤워크 생성 → `POST /predict/batch-test`. **CSV 배치 전송**은 브라우저에서 파일을 검증하고 같은 전송 함수에 `arrivals`를 전달한다. 출발 여객은 서버의 기존 고정값 37,000을 유지하며, CSV 시험 파일은 학습용 업로드를 대체하지 않는다.
   - [D2] 재학습 로그 카드(스켈레톤): `GET /logs/aiops.log` 주기 조회, `[WARN]`/`[INFO]`/`[OK]` 색 구분.
   - [D2] Production 버전 표기: `GET /monitor/versions` → 버전·RMSE·생성 시각. 재학습 전후 변화 표시.
   - 데이터 업로드 카드(스켈레톤): `POST /data/upload`.
@@ -379,8 +379,8 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 
 - 스켈레톤 카드 4개가 있다: 데이터 업로드, 드리프트 시뮬레이션, 드리프트 감지 기반 재학습 파이프라인, 재학습 로그.
 - [D1] 예측·혼잡 등급 카드: 미구현. 입력 시퀀스 출처는 C의 `GET /data/status` `recent`(미구현). 그 전에는 `data/jeju_airport_arrivals.csv` 마지막 20행을 직접 넣어 화면만 먼저 만든다.
-- [D2] CSV 배치 전송: 미구현. Production 버전 표기: 미구현 (`/monitor/versions` 미구현).
-- [D2] 드리프트 시뮬레이션 카드는 `batch_test()`가 TODO라 지금은 빈 `predictions`를 받는다.
+- [D2] CSV 배치 선택·검증·전송 구현: UTF-8(BOM 포함), CRLF, 따옴표, 열 순서 변경 지원. 최소 41일, 날짜 연속성, 필수 열, 0 이상의 정수 확인 후 기간·행 수·예측 비교 일수 표시. 기존 랜덤워크 버튼 유지, 요청 중 중복 전송 방지. Production 버전 UI는 다음 PR에서 연결한다. C의 `/monitor/versions`는 구현되어 있다.
+- [D2] 현재 `batch_test()`는 B가 구현했다. 화면은 `ok`/`anomaly`/`structure_drift`/`retrain_triggered`/`rolled_back`를 구분하며, 알 수 없는 상태를 정상으로 표시하지 않는다. 재학습·승격과 예측 품질 개선은 별도 검증 대상이다. 정상 CSV HTTP 시험과 확정 CSV 버튼 시험은 통합 화면에서 실행했고, 버전·로그 PR에 해당 실측을 기록한다.
 
 ### 측정값
 
@@ -388,13 +388,17 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 |---|---|---|
 | [D1] 페이지 로드 → 예측 표시까지 시간 | 미측정 | |
 | [D1] 표시된 예측값 / 등급 (실데이터 마지막 20일 기준) | 미측정 | |
-| [D2] CSV 배치 전송 후 `drift_check` 표시 | 미측정 | |
+| [D2] 브라우저 CSV 미리보기 | 2025-01-09 ~ 2025-02-18, 41일, 예측 비교 21일 | `jeju_drift_batch_41rows.csv` 실제 파일 선택, 전송 버튼 활성화 확인. 실제 전송은 하지 않음 |
+| [D2] 실제 모델 CSV 배치 RMSE / `drift_check` | 미측정 | 모델 학습·실제 배치 전송 미실행 |
+| [D2] 입력 검증·전송·상태·오류 처리 점검 | 23개 통과 | Node 임시 점검 스크립트(`/tmp/aiops-d2-check.cjs`), 서버 응답 대체. 실제 예측 품질 수치가 아님 |
+| [D2] 서버 상태 / Python 문법 검사 | `/health` HTTP 200, `model_loaded=false`, `loading_mode=lazy`; compileall 종료 0 | 기존 실행 서버 8000. `PYTHONPYCACHEPREFIX=/tmp/aiops-d2-pycache .venv/bin/python -m compileall -q data scripts serving_app` |
 | [D2] 로그 카드에 `[WARN]`→`[OK]` 반영까지 시간 | 미측정 | |
 | [D2] 재학습 전후 버전 표기 | 미측정 | |
 
 ### 트러블슈팅
 
-(아직 없음)
+- 2026-10-01 | D2 | 브라우저 `ERR_CONNECTION_REFUSED` → 사용자 터미널에 서버 실행 명령이 아직 없었음 → `python -m uvicorn serving_app.main:app --port 8000` 실행 후 대시보드 표시 확인(사용자 캡처). 이후 실제 `/health` 200 확인.
+- 2026-10-01 | D2 | 기존 UI가 `anomaly`·`structure_drift`·`rolled_back`를 기본 정상 문구로 표시 → B가 추가한 상태 분기가 없었음 → 문구와 파이프라인 분기 추가 → 대체 응답으로 상태별 표시 확인.
 
 ### 증빙
 
@@ -402,18 +406,22 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 |---|---|---|---|---|
 | 예측·혼잡 등급 카드 | 내일 예측값과 등급 | 미촬영 | | |
 | 최근 20일 추이 | `recent` 20행 | 미촬영 | | |
+| CSV 선택 미리보기 | 파일 기간·행 수·버튼 활성화 | 촬영 | `/tmp/aiops-d2-csv-preview.jpg` (임시 로컬 증빙) | D2, 2026-10-01 |
 | CSV 배치 전송 결과 | `drift_check` 응답 | 미촬영 | | |
 | 재학습 로그 패널 | `[WARN]` → `[INFO]` → `[OK]` 순서 | 미촬영 | | |
 | Production 버전 표기 | 재학습 전후 버전 변화 | 미촬영 | | |
 
 ### 다른 영역에 요청
 
-- C: `GET /data/status`의 `recent`, `GET /monitor/versions`.
-- B: `BatchTestRequest`에 `departures`를 넣을지 결정.
+- C: `GET /data/status`의 `recent`, `GET /monitor/versions` 구현 확인. 다음 PR에서 화면 연결.
+- B: `BatchTestRequest`에 `departures`를 넣을지 결정. 이번 D2 변경은 `arrivals`만 전송한다.
+- A/C: 최신 main의 공통 테스트 6개 중 2개 실패 확인: `serving_run_id` 응답 키 누락과 `stale`의 번호 비교 정책/테스트 기대값 불일치. D2는 해당 소스를 수정하지 않는다.
+- E: `API_SPEC.md`·기획서의 RMSE 기준 재학습 설명과 현재 B 코드의 bias 판정이 다르다. 이번 변경은 판정 기준·공통 상수를 바꾸지 않고 서버 상태를 표시한다. 파이프라인 공통 상수의 `RMSE vs 임계치` 문구도 현행 판정에 맞춘 정리 요청.
 
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | 스켈레톤 카드 구성 기록 | 해당 없음 | main
+- 2026-10-01 | D2 | CSV 선택·검증·배치 전송, 중복 요청 방지, 서버 판정 상태 표시 보완 | 대체 응답 점검 23개 통과, compileall 통과, `/health` 200. 실제 모델 RMSE·재학습·버전 전환 미측정 | feat/d2-dashboard-batch-and-version
 
 ## 5. 데이터·상수·통합 — 담당 E
 

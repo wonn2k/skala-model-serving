@@ -151,14 +151,25 @@
       <h2>드리프트 시뮬레이션</h2>
       <p>
         일별 변화율(log return) 기반 랜덤워크로 정상/드리프트 도착 여객 배치를 만들어 <code>/predict/batch-test</code>로 전송합니다.
-        드리프트 배치를 보내면 아래 파이프라인이 감지 → 재학습 → (게이트 통과 시) 재배포까지 진행됩니다.
+        서버가 재학습이 필요하다고 판단하면 재학습 → 배포 기준 확인 → 통과 시 새 모델 반영으로 이어집니다.
       </p>
     </div>
     <div class="btn-row">
-      <button class="btn primary" onclick="sendBatch('normal')">정상 배치 전송</button>
-      <button class="btn danger" onclick="sendBatch('drift')">드리프트 배치 전송</button>
+      <button class="btn primary" data-batch-action onclick="sendBatch('normal')">정상 배치 전송</button>
+      <button class="btn danger" data-batch-action onclick="sendBatch('drift')">드리프트 배치 전송</button>
     </div>
-    <div id="drift-status" style="margin-top:14px;"></div>
+    <div class="section-head" style="margin-top:20px;">
+      <label for="batch-csv-input">시험용 CSV 선택</label>
+      <p id="batch-csv-help">Date, Arrivals, Departures 열이 있는 연속된 날짜의 CSV를 선택하세요.
+        최소 41일(입력 20일 + 비교 21일)이 필요합니다. 도착 여객만 전송하며, 출발 여객은 현재 서버에서 37,000명으로 고정합니다.
+        이 파일은 학습 자료로 저장되지 않습니다. 재학습 시에는 위에서 업로드한 최신 학습 자료를 사용합니다.</p>
+      <div class="upload-row" style="margin-top:10px;">
+        <input type="file" id="batch-csv-input" accept=".csv,text/csv" aria-describedby="batch-csv-help batch-csv-summary" onchange="previewCsvBatch()" />
+        <button id="batch-csv-send" class="btn primary" data-batch-action onclick="sendCsvBatch()" disabled>CSV 배치 전송</button>
+      </div>
+      <p id="batch-csv-summary" role="status" style="margin-top:10px;">파일을 선택하면 기간과 행 수를 확인할 수 있습니다.</p>
+    </div>
+    <div id="drift-status" role="status" style="margin-top:14px;"></div>
     <div id="drift-result" class="result-box"></div>
   </div>
 
@@ -322,7 +333,7 @@ function renderPipeline() {
   badge.className = "pill neutral";
   badge.textContent = `마지막 실행 ${relTime(ts)}`;
 
-  const serverStatus = driftCheck.status; // "ok" | "retrain_triggered"
+  const serverStatus = driftCheck.status;
   const promoted = driftCheck.promoted;
 
   let states; // 7개 단계 상태: idle | ok | warn
@@ -332,12 +343,18 @@ function renderPipeline() {
     states = ["ok", "ok", "warn", "ok", "ok", "warn", "idle"];
   } else if (serverStatus === "retrain_triggered") {
     states = ["ok", "ok", "warn", "idle", "idle", "idle", "idle"];
-  } else {
+  } else if (serverStatus === "rolled_back") {
+    states = ["ok", "ok", "warn", "ok", "ok", "warn", "warn"];
+  } else if (["anomaly", "structure_drift"].includes(serverStatus)) {
+    states = ["ok", "ok", "warn", "idle", "idle", "idle", "idle"];
+  } else if (serverStatus === "ok") {
     states = ["ok", "ok", "ok", "idle", "idle", "idle", "idle"];
+  } else {
+    states = ["ok", "idle", "idle", "idle", "idle", "idle", "idle"];
   }
   const statusText = { ok: "완료", warn: "감지됨", idle: "대기 중" };
 
-  track.innerHTML = PIPELINE_STAGES.map((s, i) => stageHtml(s, i, states[i], statusText[states[i]])).join("");
+  track.innerHTML = PIPELINE_STAGES.map((s, i) => stageHtml(s, i, states[i], serverStatus === "rolled_back" && s.key === "deploy" ? "이전 모델 복귀" : statusText[states[i]])).join("");
 }
 function stageHtml(stage, idx, state, statusLabel) {
   return `
@@ -348,13 +365,104 @@ function stageHtml(stage, idx, state, statusLabel) {
     </div>`;
 }
 
+/* ===================== CSV 배치 입력 (D2) ===================== */
+let csvBatch = null;
+let batchSending = false;
+
+// 쉼표, 따옴표, UTF-8 BOM과 Windows 줄바꿈을 처리한다.
+function parseBatchCsv(text) {
+  const rows = [];
+  let row = [], cell = "", quoted = false, closed = false;
+  const source = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  for (const ch of source + "\n") {
+    if (quoted) {
+      if (ch === '"') { quoted = false; closed = true; }
+      else cell += ch;
+    } else if (closed && ch === '"') {
+      cell += '"'; quoted = true; closed = false;
+    } else if (ch === ',' || ch === '\n') {
+      row.push(cell.trim()); cell = ""; closed = false;
+      if (ch === '\n') {
+        if (row.some(value => value !== "")) rows.push(row);
+        row = [];
+      }
+    } else if (ch === '"' && cell === "" && !closed) {
+      quoted = true;
+    } else {
+      if (closed || ch === '"') throw new Error("CSV 따옴표 형식을 확인하세요.");
+      cell += ch;
+    }
+  }
+  if (quoted) throw new Error("CSV에 닫히지 않은 따옴표가 있습니다.");
+  const header = rows.shift() || [];
+  const columns = ["Date", "Arrivals", "Departures"].map(name => {
+    if (header.filter(value => value === name).length !== 1) throw new Error(`${name} 열이 정확히 하나 있어야 합니다.`);
+    return header.indexOf(name);
+  });
+  if (rows.length < SEQ_LEN + WINDOW_SIZE) throw new Error("시험용 CSV에는 헤더를 제외하고 최소 41일의 데이터가 필요합니다.");
+  let previous = null;
+  const arrivals = rows.map((values, index) => {
+    if (values.length !== header.length) throw new Error(`${index + 2}행의 열 개수가 헤더와 다릅니다.`);
+    const date = values[columns[0]];
+    const stamp = Date.parse(date + "T00:00:00Z");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0, 10) !== date) {
+      throw new Error(`${index + 2}행의 날짜를 YYYY-MM-DD 형식으로 확인하세요.`);
+    }
+    if (previous !== null && stamp - previous !== 86400000) throw new Error(`${index + 2}행: 날짜는 중복이나 빠진 날 없이 하루씩 증가해야 합니다.`);
+    previous = stamp;
+    for (const column of columns.slice(1)) {
+      if (!/^\d+(?:\.0+)?$/.test(values[column]) || !Number.isSafeInteger(Number(values[column]))) {
+        throw new Error(`${index + 2}행의 ${header[column]} 값은 0 이상의 정수여야 합니다.`);
+      }
+    }
+    return Number(values[columns[1]]);
+  });
+  return { arrivals, start: rows[0][columns[0]], end: rows[rows.length - 1][columns[0]] };
+}
+
+async function previewCsvBatch() {
+  const input = document.getElementById("batch-csv-input");
+  const summary = document.getElementById("batch-csv-summary");
+  const file = input.files[0];
+  csvBatch = null;
+  updateBatchControls();
+  summary.textContent = file ? "CSV 확인 중…" : "파일을 선택하면 기간과 행 수를 확인할 수 있습니다.";
+  if (!file) return;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+    if (input.files[0] !== file) return;
+    csvBatch = parseBatchCsv(text);
+    summary.textContent = `${file.name} · ${csvBatch.start} ~ ${csvBatch.end} · ${csvBatch.arrivals.length}일 · 예측 비교 ${csvBatch.arrivals.length - SEQ_LEN}일`;
+  } catch (error) {
+    if (input.files[0] !== file) return;
+    summary.textContent = `파일 확인 실패: ${error instanceof TypeError ? "UTF-8 형식의 CSV를 선택하세요." : error.message}`;
+  }
+  updateBatchControls();
+}
+
+function updateBatchControls() {
+  document.querySelectorAll("[data-batch-action]").forEach(button => {
+    button.disabled = batchSending || (button.id === "batch-csv-send" && !csvBatch);
+  });
+  document.getElementById("batch-csv-input").disabled = batchSending;
+}
+
+async function sendCsvBatch() {
+  if (!csvBatch || batchSending) return;
+  await sendBatch("csv", csvBatch.arrivals);
+}
+
 /* ===================== 드리프트 배치 전송 ===================== */
-async function sendBatch(kind) {
+async function sendBatch(kind, csvArrivals = null) {
+  if (batchSending) return;
   const statusEl = document.getElementById("drift-status");
   const resultBox = document.getElementById("drift-result");
   const n = SEQ_LEN + WINDOW_SIZE;
   const sigma = kind === "drift" ? DRIFT_SIGMA : NORMAL_SIGMA;
-  const arrivals = randomWalk(n, DEFAULT_BASE_ARRIVALS, sigma);
+  const arrivals = csvArrivals || randomWalk(n, DEFAULT_BASE_ARRIVALS, sigma);
+  batchSending = true;
+  updateBatchControls();
+  resultBox.classList.remove("show");
 
   statusEl.innerHTML = `<span class="pill warn"><span class="dot"></span>전송 중… (fine-tuning이 걸리면 수십 초 걸릴 수 있습니다)</span>`;
 
@@ -375,10 +483,16 @@ async function sendBatch(kind) {
 
     lastPipelineRun = { driftCheck: data.drift_check || {}, clientRmse, ts: Date.now() / 1000 };
     renderPipeline();
-    loadLogFiles();
+    loadLogFiles().catch(() => {});
 
     const check = data.drift_check || {};
-    let level = "ok", label = "정상 (드리프트 없음)";
+    const labels = {
+      ok: ["ok", "정상 (재학습 없음)"],
+      anomaly: ["warn", "일부 날짜의 큰 오차 감지 · 재학습 없음"],
+      structure_drift: ["warn", "변동 패턴 변화 감지 · 재학습 없음"],
+      rolled_back: ["warn", "배포 기준 미통과 · 이전 모델로 복귀"],
+    };
+    let [level, label] = labels[check.status] || ["neutral", "판정 확인 필요 (아래 서버 응답 참고)"];
     if (check.status === "retrain_triggered" && check.promoted) {
       level = "ok"; label = `재학습 완료 · 새 버전 승격 (rmse=${check.rmse?.toFixed?.(0) ?? check.rmse}명)`;
     } else if (check.status === "retrain_triggered" && check.promoted === false) {
@@ -388,11 +502,14 @@ async function sendBatch(kind) {
     }
     statusEl.innerHTML = `
       <span class="pill ${level}"><span class="dot"></span>${label}</span>
-      <span class="pill neutral" style="margin-left:6px;">클라이언트 계산 RMSE: ${clientRmse != null ? clientRmse.toFixed(0) : "-"}명</span>`;
+      <span class="pill neutral" style="margin-left:6px;">이번 배치 전체 예측 오차(RMSE): ${clientRmse != null ? clientRmse.toFixed(0) : "-"}명</span>`;
     showResult(resultBox, data, false);
   } catch (e) {
     statusEl.innerHTML = `<span class="pill err"><span class="dot"></span>연결 실패</span>`;
     showResult(resultBox, "요청 실패: " + e.message, true);
+  } finally {
+    batchSending = false;
+    updateBatchControls();
   }
 }
 
