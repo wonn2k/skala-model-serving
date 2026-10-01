@@ -111,7 +111,7 @@
 
 ### 다른 영역에 요청
 
-- B: 승격·롤백 **성공 후** `model_loader.reset_cache()` 호출 연결 필요. 판정 창 초기화·재학습 정책은 B가 결정/구현한다.
+- B: PR #3 병합으로 승격·롤백 **성공 후** `model_loader.reset_cache()` 호출 연결 완료. A+B 결합 검증 통과. 판정 창 초기화·재학습 정책은 B가 담당한다.
 - C/D/E: 단일 예측 응답에 `model_registry_version: str | null`을 추가했다. 기존 필드는 유지한다. C의 버전 조회와 D의 표시, E의 API 명세에 반영 요청.
 - C: `GET /data/status`에 `recent`(최근 20일, 오래된 순, `{date, arrivals, departures}`)를 넣어 주면 `/predict` 입력을 그대로 만들 수 있다.
 
@@ -132,6 +132,8 @@ uv run python logs/verify_a_http.py cache
 # 일반 실행 (레지스트리는 이 프로젝트 DB):
 MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn serving_app.main:app --host 127.0.0.1 --port 8000
 ```
+
+- 2026-10-01T14:39:52+09:00 | 윤동현/A | B PR #3이 병합된 main(de32913)을 A 브랜치에 충돌 없이 반영 | 기존 로더 테스트 8개·compileall 통과. 실제 HTTP MLflow/lazy 정상 200, 잘못된 입력 4종 422. 복제 registry에서 실제 B 승격·롤백 후 A 로드 버전 1→2→1, 승격 없는 게이트 실패 시 캐시 유지, 정상 배치 21개/판정 창 21개 확인 (`logs/ab-integration.json`, `logs/a-b-unit-results.log`, `logs/a-b-http-lazy.log`). 학습 결과는 mock, v2는 v1 artifact 재사용, 정상 배치는 상수 모델이므로 재학습 품질 검증은 아님. C의 3 epoch·E의 보간 데이터 반영 후 전체 정책 검증 필요 | feat/a-mlflow-serving / PR #5
 
 ---
 
