@@ -128,7 +128,7 @@
   - A: `MLFLOW_MODEL_URI = models:/Airport_Arrivals_Predictor/Production`을 읽는다. Registry 이름·스테이지를 바꾸면 A도 바뀐다.
   - B: `fine_tune(rows)`를 호출하고 반환 `{"promoted", "rmse", "version"}`을 쓴다. 반환 형식을 바꾸면 B도 바뀐다.
   - D1: `GET /data/status`의 `recent`를 읽는다. D2: `GET /monitor/versions`를 읽는다.
-- **설정**: `RMSE_GATE = 2700.0`, `SEED = 42`, `BASE_EPOCHS = 100`, `FINE_TUNE_EPOCHS = 10`, `FINE_TUNE_LR = 1e-4`, `MODEL_NAME`. MLflow 저장소는 cwd의 `mlflow.db`, `mlruns/`.
+- **설정**: `RMSE_GATE = 2700.0`, `SEED = 42`, `BASE_EPOCHS = 100`, `FINE_TUNE_EPOCHS = 3`, `FINE_TUNE_LR = 1e-4`, `MODEL_NAME`. MLflow 저장소는 cwd의 `mlflow.db`, `mlruns/`.
 - **실행**: `python scripts/train_baseline_v1.py` → `python serving_app/train_and_register.py` / `docker compose -f serving_app/docker-compose.yml up --build`
 
 ### 현재 상태
@@ -154,6 +154,8 @@
 | `GET /monitor/versions` 응답 예시 | `{"model_name":"Airport_Arrivals_Predictor","model_source":"mlflow","production":{"version":1,"run_id":"bbec6d0d...","rmse":2266.94,"created_at":1790831552595},"serving_version":"production","serving_run_id":null,"stale":null}` | PC 1대, `MODEL_SOURCE=mlflow uvicorn ... --port 8000` 후 `curl localhost:8000/monitor/versions` |
 | `GET /data/status`의 `recent` | 20건, `2025-10-12` ~ `2025-10-31`, 오래된 순, arrivals/departures 모두 int | PC 1대, `curl localhost:8000/data/status` |
 | `recent`를 그대로 `/predict`에 전달 | HTTP 200, `{"predicted_arrivals":39772.69,"model_version":"production"}` | PC 1대, `/data/status`의 recent를 `sequence`로 변환해 POST |
+| B 머지 뒤 C API 동작 | `/monitor/versions`, `/data/status`의 `recent`, `recent → /predict` 모두 정상 | PC 1대, `origin/main`(B 포함) 위에 리베이스 후 `MODEL_SOURCE=mlflow ... --port 8000` |
+| fine-tune 3 epoch 전체 루프 | 재학습 전 41283.94 → 후 41547.42로 바뀜 (캐시 갱신 확인). `[OK] new_rmse=2108 v3`, `[OK] new_rmse=1949 v4` | PC 1대, `reset_cache()`를 임시로 넣고 측정. A의 PR 전이라 임시 코드는 커밋하지 않음 |
 | Day1 baseline RMSE (이 PC) | 2,945명 | PC 2대째, `python scripts/train_baseline_v1.py`. 다른 PC에서는 2,571명과 2,191명이 나왔다 |
 | Day2 MLflow 학습 RMSE (이 PC) | 2,267명 (2266.94) | PC 2대째, `python serving_app/train_and_register.py`. seed 42 고정이라 다른 PC와 같은 값 |
 
@@ -173,6 +175,7 @@
 
 ### 다른 영역에 요청
 
+- **A에게 (급함)**: `model_loader.reset_cache()`가 아직 없어 **승격이 일어나는 순간 `AttributeError`로 `/predict/batch-test`가 500**이 난다. B의 `retrain_trigger.py`가 45행과 97행에서 부른다. 임시로 넣어 보니 전체 루프가 정상 동작했고 재학습 후 예측값도 41283.94에서 41547.42로 바뀌었다.
 - **A에게**: `LoadedModel`이 `run_id`를 함께 보관해 주면 좋겠다. `_load_from_mlflow()`에서 로드한 모델이 어느 run에서 왔는지 알 수 있으면, `GET /monitor/versions`가 "레지스트리는 v2인데 서버는 v1을 들고 있다"를 자동으로 판정할 수 있다. 지금은 `stale`이 항상 `null`이다.
   재배포 후 캐시가 안 비워지는 문제(수업 가이드 부록1의 6번)를 **대시보드에서 눈으로 볼 수 있게** 만드는 일이라, D2의 버전 표기와도 이어진다. `LoadedModel.__init__`에 `run_id=None` 인자를 하나 늘리는 정도면 충분하다.
 - **D1에게**: `GET /data/status`의 `recent`가 올라갔다. 20건, 오래된 날 → 최근 날 순서이고 그대로 `/predict`의 `sequence`로 보내면 된다 (`arrivals`를 float로만 바꾸면 됨). 확인 완료.
@@ -181,7 +184,8 @@
 ### 변경 기록
 
 - 2026-09-30 21:40 | 초기 작성 | Day1·Day2 실행 결과 기록 | Day1 RMSE 2,571명 (`python scripts/train_baseline_v1.py`), Day2 RMSE 2,267명 (`python serving_app/train_and_register.py`) | main
-- 2026-10-01 13:10 | 유경모 | `GET /monitor/versions` 신설(`routers/monitor.py`, `main.py` 한 줄), `GET /data/status`에 `recent` 20건 추가 | `/monitor/versions`가 Production v1, rmse 2266.94 반환. `recent`를 그대로 `/predict`에 보내 HTTP 200 확인. Day1 2,945명 / Day2 2,267명 | feat/monitor-versions-and-recent
+- 2026-10-01 13:10 | 유경모 | `GET /monitor/versions` 신설(`routers/monitor.py`, `main.py` 한 줄), `GET /data/status`에 `recent` 20건 추가 | `/monitor/versions`가 Production v1, rmse 2266.94 반환. `recent`를 그대로 `/predict`에 보내 HTTP 200 확인. Day1 2,945명 / Day2 2,267명 | feat/c-monitor-versions
+- 2026-10-01 14:50 | 유경모 | B 머지본 위로 리베이스. `FINE_TUNE_EPOCHS` 10 → 3 (B의 `BIAS_THRESHOLD` 500이 3 epoch 전제라 같이 움직여야 함) | 충돌 없음(B와 파일이 겹치지 않음). 전체 루프 재학습 전 41283.94 → 후 41547.42. ⚠️ `model_loader.reset_cache()`가 아직 없어 승격 시점에 `AttributeError`로 batch-test가 500이 난다 (A 대기) | feat/c-monitor-versions
 
 ---
 
