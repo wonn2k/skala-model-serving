@@ -4,8 +4,11 @@ Day1 -> Day3(시뮬레이션 엔드포인트 추가) 확장 파일.
 Day1: POST /predict - 최근 SEQ_LEN(20)일 시퀀스로 다음날 도착 여객 수 예측
 Day3: POST /predict/batch-test - 드리프트 감지 시뮬레이션 시작점 (scripts/simulate_drift.py 참고)
 """
+from datetime import date
+
 from fastapi import APIRouter
 
+from data.calendar import shift
 from data.features import SEQ_LEN
 from serving_app import model_loader
 from serving_app.schemas import PredictRequest, PredictResponse, BatchTestRequest, BatchTestResponse
@@ -27,7 +30,8 @@ SIMULATED_DEPARTURES = 37_000
 def predict(req: PredictRequest):
     model = model_loader.get_model()
     sequence = [p.model_dump() for p in req.sequence]
-    predicted_arrivals = model.predict_one(sequence)
+    target_date = req.target_date or shift(date.today().isoformat(), 1)
+    predicted_arrivals = model.predict_one(sequence, target_date)
     return PredictResponse(predicted_arrivals=round(predicted_arrivals, 2), model_version=model.version)
 
 
@@ -50,10 +54,11 @@ def batch_test(req: BatchTestRequest):
     predictions: list[float] = []
 
     arrivals = req.arrivals
+    start_date = req.start_date or shift(date.today().isoformat(), 1 - len(arrivals))  # 마지막 값 = 오늘
     for i in range(len(arrivals) - SEQ_LEN):
         window = arrivals[i : i + SEQ_LEN]
         sequence = [{"arrivals": a, "departures": SIMULATED_DEPARTURES} for a in window]
-        pred = model.predict_one(sequence)
+        pred = model.predict_one(sequence, shift(start_date, i + SEQ_LEN))
         actual = arrivals[i + SEQ_LEN]
         predictions.append(pred)
         recent_predictions.append({"predicted": pred, "actual": actual})

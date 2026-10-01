@@ -8,6 +8,8 @@ Day1 baseline 학습(scripts/train_baseline_v1.py), Day2 MLflow 학습
 방지할 수 있습니다.
 
 입력 시퀀스: 최근 SEQ_LEN(20)일의 (arrivals=도착 여객 수, departures=출발 여객 수)
+             + 각 날의 "다음 날" 달력 피처 4개 (요일 sin/cos, 공휴일, 연휴) — data/calendar.py
+             마지막 스텝의 달력 = 예측 대상 날짜의 달력. 그래서 시퀀스에 날짜가 필요하다.
 타깃: 그다음 날의 arrivals(도착 여객 수)
 
 [도메인 매핑] HAIC 템플릿 -> 공항 도착 여객 예측
@@ -17,7 +19,10 @@ Day1 baseline 학습(scripts/train_baseline_v1.py), Day2 MLflow 학습
 import csv
 import pickle
 
+from data.calendar import N_CALENDAR_FEATURES, calendar_features, shift
+
 SEQ_LEN = 20  # LSTM 입력 윈도우 길이 (일 수) - 약 3주치 일별 데이터
+N_FEATURES = 2 + N_CALENDAR_FEATURES  # (arrivals, departures) + 다음 날 달력
 
 
 def load_rows(csv_path: str = "data/airport_arrivals.csv") -> list[dict]:
@@ -91,20 +96,31 @@ class AirportScaler:
         return scaler
 
 
+def make_sequence(points: list[dict], target_date: str, scaler: AirportScaler) -> list[list[float]]:
+    """
+    서빙·학습 공용: 최근 SEQ_LEN일의 (arrivals, departures)와 예측 대상 날짜로 입력 시퀀스를 만든다.
+    k번째 스텝 = [scaled arrivals, scaled departures, 그 다음 날의 달력 4개]. 마지막 스텝의 달력이 target_date.
+    points는 오래된 날 -> 최근 날 순서, 길이 SEQ_LEN. 날짜는 target_date에서 거꾸로 센다 (연속된 날이어야 함).
+    """
+    n = len(points)
+    return [
+        scaler.transform_point(p["arrivals"], p["departures"]) + calendar_features(shift(target_date, k - n + 1))
+        for k, p in enumerate(points)
+    ]
+
+
 def build_sequences(rows: list[dict], scaler: AirportScaler, seq_len: int = SEQ_LEN):
     """
-    rows(시간순 일별 데이터)에서 (SEQ_LEN, 2) 크기의 정규화된 입력 시퀀스와
+    rows(시간순 일별 데이터)에서 (SEQ_LEN, N_FEATURES) 크기의 정규화된 입력 시퀀스와
     다음날 도착 여객 수(정규화 전 실값) 타깃을 만든다.
 
-    반환: X (n_samples, seq_len, 2), y (n_samples,) - y는 스케일 안 된 실제 도착 여객 수
+    반환: X (n_samples, seq_len, N_FEATURES), y (n_samples,) - y는 스케일 안 된 실제 도착 여객 수
     """
-    scaled_points = [scaler.transform_point(r["Arrivals"], r["Departures"]) for r in rows]
-    arrivals = [r["Arrivals"] for r in rows]
-
     X, y = [], []
     for i in range(len(rows) - seq_len):
-        X.append(scaled_points[i : i + seq_len])
-        y.append(arrivals[i + seq_len])
+        window = [{"arrivals": r["Arrivals"], "departures": r["Departures"]} for r in rows[i : i + seq_len]]
+        X.append(make_sequence(window, rows[i + seq_len]["Date"], scaler))
+        y.append(rows[i + seq_len]["Arrivals"])
     return X, y
 
 

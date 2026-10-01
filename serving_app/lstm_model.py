@@ -9,9 +9,7 @@ Dense 1층 구조를 택했습니다 - 이 정도 크기(파라미터 약 1.6만
 """
 from tensorflow import keras
 
-from data.features import SEQ_LEN
-
-N_FEATURES = 2  # (arrivals, departures)
+from data.features import SEQ_LEN, N_FEATURES  # (arrivals, departures) + 다음 날 달력 4개
 
 
 def build_model() -> keras.Model:

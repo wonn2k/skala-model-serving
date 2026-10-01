@@ -24,6 +24,11 @@ class PredictRequest(BaseModel):
         max_length=SEQ_LEN,
         description=f"가장 오래된 날 -> 가장 최근 날 순서의 최근 {SEQ_LEN}일 시퀀스",
     )
+    target_date: str | None = Field(
+        None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="예측 대상 날짜 (YYYY-MM-DD). 시퀀스 마지막 날의 다음 날. 생략하면 오늘의 다음 날",
+    )
 
 
 class PredictResponse(BaseModel):
@@ -36,6 +41,11 @@ class BatchTestRequest(BaseModel):
     # SEQ_LEN + N 개의 연속된 일별 도착 여객 수를 보내면, 서버가 내부적으로 슬라이딩 윈도우로
     # 잘라 여러 건을 연속 예측한다. (출발 여객 수는 시뮬레이션이므로 고정값을 사용)
     arrivals: list[float] = Field(..., min_length=SEQ_LEN + 1)
+    start_date: str | None = Field(
+        None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="arrivals[0]의 날짜 (YYYY-MM-DD). 달력 피처용. 생략하면 마지막 값이 오늘이 되도록 거꾸로 센다",
+    )
 
 
 class BatchTestResponse(BaseModel):

@@ -40,14 +40,16 @@ class LoadedModel:
         self.scaler = scaler
         self.version = version
 
-    def predict_one(self, sequence: list[dict]) -> float:
+    def predict_one(self, sequence: list[dict], target_date: str) -> float:
         """
         sequence: [{"arrivals": ..., "departures": ...}, ...] 길이 SEQ_LEN, 오래된 날 -> 최근 날 순서.
+        target_date: 예측 대상 날짜 (YYYY-MM-DD). 달력 피처(요일·공휴일·연휴)가 여기서 나온다.
         """
         import numpy as np
 
-        scaled = [self.scaler.transform_point(p["arrivals"], p["departures"]) for p in sequence]
-        x = np.array([scaled], dtype="float32")  # (1, SEQ_LEN, 2)
+        from data.features import make_sequence
+
+        x = np.array([make_sequence(sequence, target_date, self.scaler)], dtype="float32")  # (1, SEQ_LEN, N_FEATURES)
         pred_scaled = float(self._keras_model.predict(x, verbose=0)[0][0])
         return self.scaler.inverse_arrivals(pred_scaled)
 
