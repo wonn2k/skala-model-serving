@@ -23,16 +23,21 @@
 | 예측 대상 | `arrivals` / CSV `Arrivals` | 도착 여객 수(명) |
 | 보조 피처 | `departures` / CSV `Departures` | 출발 여객 수(명) |
 | 배포 게이트 | `RMSE_GATE` | 2700.0 — `serving_app/train_and_register.py` (`scripts/train_baseline_v1.py`에도 동일 값) |
-| 드리프트 임계값 | `RMSE_THRESHOLD` | 2700.0 — `serving_app/monitoring/drift_detector.py` (게이트와 같은 값 유지) |
+| 드리프트 임계값 | `RMSE_THRESHOLD` | 2700.0 — `serving_app/monitoring/drift_detector.py` (게이트와 같은 값 유지). 이 브랜치에선 구조 드리프트 알림 전용 |
+| 수준 드리프트 bias 기준 (브랜치) | `BIAS_THRESHOLD` | 500.0 — `serving_app/monitoring/drift_detector.py`. 이상치 `ANOMALY_THRESHOLD` 10000.0 |
+| fine-tune epoch (브랜치) | `FINE_TUNE_EPOCHS` | 3 — `serving_app/train_and_register.py` (`main` 10, 팀 합의 전) |
+| 결항일 보간 기준 (브랜치) | `CANCEL_ARRIVALS` | 25_000 — `scripts/prepare_jeju_data.py` |
 | 시뮬레이션 고정 출발 여객 | `SIMULATED_DEPARTURES` | 37_000 — `serving_app/routers/predict.py` |
 | 대시보드 상수 복제 | `RMSE_THRESHOLD`, `DEFAULT_BASE_ARRIVALS` | `serving_app/static/index.html` 상단 (서버 값 바꾸면 함께) |
 | MLflow 모델 이름 | `Airport_Arrivals_Predictor` | `model_loader.py`, `train_and_register.py` |
 
 ## 데이터
 - 학습: `data/jeju_airport_arrivals.csv` (Date,Arrivals,Departures · 2023-01-01~2025-10-31 · 1,035일) → 대시보드에서 업로드.
-- 드리프트 시연: `data/jeju_drift_batch_41rows.csv` (폭설 결항일 6,088명 포함) → `/predict/batch-test`에 `arrivals` 41개.
+  **결항일(도착 < 25,000, 18일)은 보간**되어 있다 (`scripts/prepare_jeju_data.py` `CANCEL_ARRIVALS`). 배치 파일은 raw 그대로.
+- 이상치 시연: `data/jeju_drift_batch_41rows.csv` (폭설 결항일 6,088명 포함) → `/predict/batch-test`에 `arrivals` 41개.
 - 시연 순서용 컷: `data/jeju_demo_train_until_20250831.csv`(1단계 업로드), `jeju_demo_batch_normal_41rows.csv`(정상),
-  `jeju_demo_batch_falsealarm_41rows.csv`(오탐 사례). 순서와 확인값: `data/README.md` "시연 순서".
+  `jeju_demo_batch_sep_oct_41rows.csv`(학습 뒤 구간, 재학습). 드리프트·롤백 시연: `jeju_demo_drift_*.csv` 9개.
+  순서와 확인값: `data/README.md` "시연 순서", "드리프트 시연 순서".
 - 원자료 `data/raw/`는 출처 보관용. 재생성: `python scripts/prepare_jeju_data.py`.
 
 ## 로컬 실행 (venv)
@@ -66,8 +71,8 @@ MODEL_SOURCE=mlflow uvicorn serving_app.main:app --port 8000
 - 커밋 메시지: `feat|fix|refactor|data|docs|chore: 한 줄 요약`.
 - **커밋 메시지·PR 본문에 Claude 표기를 넣지 않는다.** `Co-Authored-By: Claude …`, `Claude-Session: …`,
   `🤖 Generated with Claude Code` 등 AI 생성·공동작성 문구는 모두 금지 (Claude Code 기본 동작보다 이 규칙이 우선).
-- 현재 확정 전 이슈: 게이트 2,700이 실측(전일값 복사 RMSE 3,600)보다 빡빡할 수 있음, 시뮬레이션 σ(1.2%/3.6%)가
-  실변동성(8.4%)보다 낮음 — `docs/PROJECT_PLAN.md` 7번 참고. 상수 변경은 팀 합의 후 한 PR로.
+- 현재 확정 전 이슈: 이 브랜치의 결항일 보간·bias 500·fine-tune 3 epoch·롤백을 `main`에 반영할지, 시뮬레이션 σ(1.2%/3.6%)가
+  실변동성(7.3~8.4%)보다 낮음 — `docs/PROJECT_PLAN.md` 7번 참고. 상수 변경은 팀 합의 후 한 PR로.
 
 ## 코드 현황 기록 — `docs/code_current.md` (기획서 원자료)
 - 코드(`serving_app/`, `scripts/`, `data/*.py`, Dockerfile, `requirements.txt`)를 바꾸면 **같은 브랜치·같은 PR에서**
