@@ -11,10 +11,10 @@ Day2~3: 지금 무엇이 서비스되고 있는지 보여주는 조회 전용 �
     그래서 이 엔드포인트는 "레지스트리가 뭐라고 하는가"와 "서버가 실제로 뭘 쓰고 있는가"를
     나란히 돌려준다.
 
-    다만 지금은 둘이 어긋났는지 자동으로 판정할 수 없다. LoadedModel이 version 문자열
-    ("production")만 들고 있고 어느 run에서 왔는지는 모르기 때문이다. 판정하려면
-    model_loader가 run_id를 함께 보관해야 하는데 그 파일은 A의 소유라, code_current.md의
-    "다른 영역에 요청"에 적어 두었다. 그때까지는 serving_run_id를 null로 돌려준다.
+    처음에는 둘이 어긋났는지 판정할 수 없었다. LoadedModel이 version 문자열("production")만
+    들고 있어서 몇 번 버전인지 몰랐기 때문이다. A가 LoadedModel.registry_version을 추가해
+    줘서(PR #5) 이제 레지스트리의 Production 번호와 직접 비교해 stale을 판정한다.
+    이것이 수업 가이드 부록1의 6번(승격했는데 서버는 옛 모델로 응답) 재현 지점이다.
 
 조회 실패를 숨기지 않는다
     처음엔 실패를 모두 production: null로 뭉갰는데, 그러면 네 가지 상황이 똑같이 보인다.
@@ -122,19 +122,22 @@ def versions():
             "production": None,
             "registry_error": None,
             "serving_version": serving_version,
-            "serving_run_id": None,
+            "serving_registry_version": None,
             "stale": False,  # 로컬 모델은 레지스트리와 비교할 대상이 없다
         }
 
     production, registry_error = _registry_production()
 
-    # 서버가 어느 run의 모델을 들고 있는지. LoadedModel이 아직 run_id를 보관하지 않아
-    # 지금은 항상 None이다. A가 추가하면 production["run_id"]와 비교해 stale을 판정할 수 있다.
-    serving_run_id = getattr(cached, "run_id", None) if cached is not None else None
+    # 서버가 들고 있는 모델의 레지스트리 번호. lazy 모드에서 첫 요청 전이면 None이다.
+    serving_registry_version = (
+        getattr(cached, "registry_version", None) if cached is not None else None
+    )
 
-    stale = None  # 판정 불가. True/False가 아니라 null로 둬서 "모른다"를 구분한다
-    if production is not None and serving_run_id is not None:
-        stale = serving_run_id != production["run_id"]
+    # stale 판정. 비교할 양쪽이 다 있을 때만 True/False를 내고, 하나라도 없으면 null로 둬서
+    # "어긋났다"와 "모른다"를 구분한다. 번호는 문자열로 올 수 있어 str로 맞춰 비교한다.
+    stale = None
+    if production is not None and serving_registry_version is not None:
+        stale = str(serving_registry_version) != str(production["version"])
 
     return {
         "model_name": MODEL_NAME,
@@ -144,6 +147,6 @@ def versions():
         "production": production,
         "registry_error": registry_error,
         "serving_version": serving_version,
-        "serving_run_id": serving_run_id,
+        "serving_registry_version": serving_registry_version,
         "stale": stale,
     }
