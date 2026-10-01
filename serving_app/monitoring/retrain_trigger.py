@@ -65,9 +65,10 @@ def check_and_trigger(recent_predictions: list[dict]) -> dict:
         )
     if not a["drift"]:
         if a["rmse_excl_anomalies"] > RMSE_THRESHOLD:
-            # 오차는 크지만 치우침이 없다 - 연휴·변동 큰 기간. 재학습으로 줄지 않으므로 알림만.
-            logger.warning(f"[WARN] high error without bias - rmse={a['rmse_excl_anomalies']:.0f} bias={a['bias_excl_anomalies']:+.0f} (no retrain)")
-            status = "high_error"
+            # 오차는 크지만 치우침이 없다 - 변동 패턴(주간 진폭 등)이 바뀐 구조 변화. 최근 41행 fine-tuning으로는
+            # 줄지 않으므로 알림만 남기고 모델 재설계 대상으로 표시한다.
+            logger.warning(f"[WARN] structure drift (high error, no bias) - rmse={a['rmse_excl_anomalies']:.0f} bias={a['bias_excl_anomalies']:+.0f} (no retrain)")
+            status = "structure_drift"
         else:
             status = "anomaly" if a["anomalies"] else "ok"
         return {"status": status, "rmse": a["rmse"], "bias": a["bias"], "anomaly_days": len(a["anomalies"])}
@@ -94,6 +95,7 @@ def check_and_trigger(recent_predictions: list[dict]) -> dict:
         from serving_app import model_loader
 
         model_loader.reset_cache()  # 다음 /predict부터 새 Production 사용
+        recent_predictions.clear()  # 이전 모델의 예측으로 새 모델을 판정하지 않도록 윈도우 초기화
         _last_promotion = {"prev": prev, "new": result["version"]}
         logger.info(f"[OK] new_rmse={result['rmse']:.0f} - production promoted: Airport_Arrivals_Predictor v{result['version']}")
         return {"status": "retrain_triggered", "promoted": True, "rmse": result["rmse"], "version": result["version"]}

@@ -15,7 +15,7 @@ import math
 RMSE_THRESHOLD = 2700.0  # 명 - serving_app/train_and_register.py의 RMSE_GATE와 동일
 WINDOW_SIZE = 21  # 최근 21건 기준
 ANOMALY_THRESHOLD = 10_000.0  # 명 - 하루 오차가 이 값을 넘으면 이상치(결항 등). 평상시 최대 하루 오차(~8,000)보다 크게
-BIAS_THRESHOLD = 2_000.0  # 명 - 평균 오차가 한쪽으로 이만큼 치우치면 수요 수준이 바뀐 것. 평상시 |bias| 최대 ~1,900 (실험 4)
+BIAS_THRESHOLD = 1_500.0  # 명 - 평균 오차가 한쪽으로 이만큼 치우치면 수요 수준이 바뀐 것. 1,000/1,500/2,000 시뮬레이션 중 재학습 최소·RMSE 최저 (실험 5)
 
 
 def compute_rmse(recent_predictions: list[dict]) -> float:
