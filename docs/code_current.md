@@ -55,14 +55,14 @@
 
 - **역할**: 최근 20일 시퀀스를 받아 다음 날 도착 여객 수 하나를 돌려주는 HTTP 서버. 모델을 어디서(로컬 파일 / MLflow Production) 언제(기동 시 / 첫 요청 시) 불러올지 정한다.
 - **구성 요소**
-  - `main.py`: `FastAPI` 앱 생성, 라우터 4개 등록(`predict`, `health`, `data`, `logs`), `aiops` 로거를 `logs/aiops.log`에 연결, `static/`을 `/`에 마운트, `startup`에서 `LOADING_MODE=eager`면 `model_loader.load_eager()`.
-  - `model_loader.py`: `get_model()` → `_model_cache`가 비어 있으면 `_load_model()` → `MODEL_SOURCE`에 따라 `_load_from_local()`(`serving_app/models/airport_v1.keras` + `scaler.pkl`, 버전 `v1-local`) 또는 `_load_from_mlflow()`(Production을 조회한 뒤 `models:/Airport_Arrivals_Predictor/<실제 버전>`으로 고정해서 로드, **TODO 1 구현**). 반환은 `LoadedModel(predict_one, version, registry_version)`. 스케일러는 기존 로컬 `scaler.pkl`을 그대로 사용하며 재학습하지 않는다.
+  - `main.py`: `FastAPI` 앱 생성, 라우터 5개 등록(`predict`, `health`, `data`, `logs`, `monitor`), `aiops` 로거를 `logs/aiops.log`에 연결, `static/`을 `/`에 마운트, `startup`에서 `LOADING_MODE=eager`면 `model_loader.load_eager()`.
+  - `model_loader.py`: `get_model()` → `_model_cache`가 비어 있으면 `_load_model()` → `MODEL_SOURCE`에 따라 `_load_from_local()`(`serving_app/models/airport_v1.keras` + `scaler.pkl`, 버전 `v1-local`) 또는 `_load_from_mlflow()`(Production을 조회한 뒤 `models:/Airport_Arrivals_Predictor/<실제 버전>`으로 고정해서 로드, **TODO 1 구현**). 반환은 `LoadedModel(predict_one, version, registry_version, run_id)`. 스케일러는 기존 로컬 `scaler.pkl`을 그대로 사용하며 재학습하지 않는다.
   - `routers/predict.py` `predict()`: `PredictRequest.sequence` 20개 → `model.predict_one()` → `PredictResponse(predicted_arrivals, model_version, model_registry_version)`. 기존 `model_version="production"`을 유지하고 실제 등록 번호를 별도 필드로 반환한다. 로컬 모델의 등록 번호는 `null`.
   - `routers/health.py`: `GET /health` → 상태, 로딩 모드, 모델 로드 여부.
   - `schemas.py`: `PredictRequest`(길이 20, `arrivals`·`departures` 0 이상 정수), 위반 시 422.
 - **흐름**: 대시보드 또는 클라이언트 → `POST /predict` → Pydantic 검증 → `get_model()`(캐시) → 스케일 → LSTM → 역스케일 → JSON 응답.
 - **다른 영역과의 연결**
-  - C가 만드는 `GET /data/status`의 `recent`가 이 API의 입력이 된다 (D1이 호출).
+  - C의 `GET /data/status`의 `recent`가 이 API의 입력이 된다 (D1이 호출).
   - A가 제공한 `model_loader.reset_cache()`를 B가 승격·롤백 성공 후 호출하면 다음 예측에서 모델을 다시 로드한다. 호출부는 B 영역이며 이번 PR에서는 수정하지 않는다. 캐시 잠금으로 첫 로딩과 초기화의 경합을 막는다.
   - D2는 소스 구분에 `model_version`, 실제 서빙 버전 번호 표시에 `model_registry_version`을 사용할 수 있다. 현재 레지스트리 Production과 메모리에 로드된 버전은 다를 수 있다.
 - **설정**: `LOADING_MODE=lazy|eager`(기본 lazy), `MODEL_SOURCE=local|mlflow`(기본 local), `MLFLOW_MODEL_URI`.
@@ -73,7 +73,8 @@
 - `GET /health`, `POST /predict`는 스켈레톤 그대로 완성되어 있다.
 - `/predict` 입력은 최근 20일 시퀀스(`arrivals`, `departures`)이며 길이가 20이 아니거나 값이 음수이면 422로 거부한다.
 - TODO 1 구현 완료. Production 조회 결과와 같은 버전 URI로 가중치를 읽고 응답 번호를 기록한다. Production이 없거나 로딩이 실패하면 로컬 모델로 조용히 대체하지 않는다.
-- Lazy/Eager 및 캐시 초기화 함수 구현·검증 완료. B 호출 연결 전에는 승격만으로 캐시가 바뀌지 않는다.
+- Lazy/Eager 및 캐시 초기화 구현·검증 완료. B의 승격·롤백 성공 후 reset 연결도 실제 재학습으로 검증했다.
+- C 요청 반영: 실제 선택한 등록 버전의 `run_id`를 모델 객체에 함께 보관한다. C 조회 API 코드 수정 없이 `serving_run_id`와 `stale` 판정이 연결된다. 로컬 모델/학습 run 정보가 없는 등록은 `run_id=None`, lazy 로딩 전 비교는 미확정(`stale=null`)이다.
 - `reset_cache()`는 호출한 프로세스에만 적용된다. 이미 모델을 받은 요청은 기존 모델로 마치며, 다중 worker 간 동기화는 구현 범위 밖이다.
 - 교수 실습가이드 v3의 Day2 `model_version: production`, Day1 고정 스케일러, Lazy/Eager 방식 유지. 모델 구조·피처·학습·게이트·드리프트 정책은 변경하지 않았다.
 
@@ -90,10 +91,14 @@
 | 입력 오류 | 19행·21행·음수·departures 누락 모두 422 (4모드 × 4종) | local/lazy, mlflow/lazy, mlflow/eager, 별도 registry 모드 |
 | 캐시 전환 | 승격 직후 번호 1 → reset 후 2 → 롤백+reset 후 1 | 복제 SQLite DB, 같은 v1 artifact로 v2 등록. 실제 재학습/성능 개선 검증 아님 |
 | 캐시·로더 테스트 | 8개 통과 | 버전 2/11 숫자 비교, 고정 scaler, Production 없음, 실패 후 재시도, 동시 첫 요청 1회 로드, 로딩 중 reset, eager 캐시, 반복 reset |
+| A→C 모델 식별·B 판정 창 회귀 | 신규 6개 + 기존 8개 통과 | `python -m unittest discover -s tests -v`, 기존 로컬 `logs/verify_a_unit.py` |
+| 실제 재학습/조회 통합 | v1→v2→v3→v2 롤백, 단계별 `stale=false`; 의도적 Registry/캐시 불일치 `true` → 복구 `false` | 별도 작업 폴더·DB, 실제 HTTP 8000, 같은 20일 입력 예측 33,339.53→32,677.49→32,114.58→32,677.49. 게이트 RMSE 1,961.28→1,338.33→902.29→2,741.53(실패) |
 | `/health` | lazy 초기 false → 예측 후 true, eager 초기 true | 모두 `status: ok` |
 
 ### 트러블슈팅
 
+- `/monitor/versions`가 계속 `stale=null`: A 모델 객체에 `run_id`가 없었음 → 선택한 모델 버전 메타데이터에서 함께 보관 → 실제 HTTP에서 정상 `false`, 불일치 `true` 확인. `null` 자체가 500을 발생시키지는 않는다.
+- 연속 배치 진단: 41행은 예측 21개를 만들어 이전 창을 전부 교체한다. 21행 요청은 새 예측 1개라 과거 20개를 유지한다(rolling window). 테스트 2개로 구분했다. `data/README.md` 9단계 실측은 서버 재시작 없이 정상→승격→확정→승격→롤백 완료. 모델/학습 CSV가 바뀌므로 배치 순서별 판정 차이만으로 캐시 잔존을 단정하지 않는다.
 - 이전: MLflow 로드는 `NotImplementedError`. 원인: TODO 1 미구현. 해결: Production 조회·정확한 버전 로드·고정 scaler 결합. 이후 실제 `/predict` 200, `model_version=production`, `model_registry_version=1`.
 - Production 상태 이름만 출력하면 버전 전환을 구분할 수 없으므로 기존 필드는 보존하고 등록 번호 필드를 추가했다.
 - 테스트 중 MLflow stage API의 폐기 예정 경고가 출력됨. 수업의 Production stage 방식을 유지했다. 별칭 전환은 이번 범위 밖이며 기능 오류는 아니었다.
@@ -105,6 +110,7 @@
 |---|---|---|---|---|
 | HTTP local/lazy/eager | 예측 결과·시간·health·422 | 실제 실행 로그 확보, UI 캡처 미촬영 | `logs/a-http-local.json`, `logs/a-http-lazy.json`, `logs/a-http-eager.json` | 윤동현/A |
 | 버전 전환·롤백 후 reset | 같은 프로세스에서 등록 번호 1→2→1 | 실제 HTTP 확인, 재학습 호출 없음 | `logs/a-http-cache.json` | 윤동현/A |
+| run_id 연결·실제 A/B/C 루프 | 승격·롤백 후 예측/조회 일치, 의도적 불일치 탐지 | 통과 | `logs/run-id-e2e-results.json`, `logs/run-id-e2e.log`, `tests/test_serving_identity.py` | 윤동현/A |
 | 캐시·로더 테스트 | 경합·실패·재시도 등 8개 | 통과 | `logs/a-unit-results.log` | 윤동현/A |
 
 로그와 검증 스크립트(`logs/verify_a_unit.py`, `logs/verify_a_http.py`)는 이 PC의 Git 제외 경로에 보관한다. 위 측정표와 PR 본문에 결과를 함께 기록하며, UI 스크린샷으로 간주하지 않는다.
@@ -113,7 +119,10 @@
 
 - B: PR #3 병합으로 승격·롤백 **성공 후** `model_loader.reset_cache()` 호출 연결 완료. A+B 결합 검증 통과. 판정 창 초기화·재학습 정책은 B가 담당한다.
 - C/D/E: 단일 예측 응답에 `model_registry_version: str | null`을 추가했다. 기존 필드는 유지한다. C의 버전 조회와 D의 표시, E의 API 명세에 반영 요청.
-- C: `GET /data/status`에 `recent`(최근 20일, 오래된 순, `{date, arrivals, departures}`)를 넣어 주면 `/predict` 입력을 그대로 만들 수 있다.
+- C: `recent`는 PR #6으로 연결 완료. `run_id` 보관 요청도 이번 변경에서 대응. `monitor.py`의 “항상 null” 주석/문서 갱신은 C에 요청한다. 같은 run을 여러 버전으로 등록한 경우 현재 run 비교만으로는 버전 차이를 구분하지 못하므로, 정확한 등록 번호 비교가 필요하면 A의 `registry_version` 사용을 권장한다.
+- C: 실제 승격 후 이전 버전들도 Production에 남는 현상을 확인했다. 기존 버전 Archived 처리는 학습·배포 담당 후속 PR에서 조율한다.
+- E: 3월 18일 학습 컷 마지막 값 30,608은 3월 19일 원자료를 사용한 보간이다. 시점별 데이터 생성으로 미래 정보 누수를 제거한 후 게이트/롤백 결과를 재확인해야 한다. 이번 통합 결과는 현재 배포 CSV의 동작 확인이며 데이터 타당성 보증은 아니다.
+- E/D2: `serving_run_id`는 로드한 모델의 실제 run, `stale`은 C의 기존 비교 결과다. API_SPEC·0번 표·프론트는 담당자 영역에서 갱신 요청.
 
 ### 변경 기록
 
@@ -134,6 +143,8 @@ MLFLOW_TRACKING_URI=sqlite:///mlflow.db MODEL_SOURCE=mlflow uv run uvicorn servi
 ```
 
 - 2026-10-01T14:39:52+09:00 | 윤동현/A | B PR #3이 병합된 main(de32913)을 A 브랜치에 충돌 없이 반영 | 기존 로더 테스트 8개·compileall 통과. 실제 HTTP MLflow/lazy 정상 200, 잘못된 입력 4종 422. 복제 registry에서 실제 B 승격·롤백 후 A 로드 버전 1→2→1, 승격 없는 게이트 실패 시 캐시 유지, 정상 배치 21개/판정 창 21개 확인 (`logs/ab-integration.json`, `logs/a-b-unit-results.log`, `logs/a-b-http-lazy.log`). 학습 결과는 mock, v2는 v1 artifact 재사용, 정상 배치는 상수 모델이므로 재학습 품질 검증은 아님. C의 3 epoch·E의 보간 데이터 반영 후 전체 정책 검증 필요 | feat/a-mlflow-serving / PR #5
+
+- 2026-10-01T15:25:14+09:00 | 윤동현/A | C 요청의 run_id 연결 및 연속 배치 진단 | 신규 6개/기존 8개 통과, 실제 학습·HTTP 8000에서 v1→v2→v3→v2 및 stale false/true/false 확인. B/C 런타임 코드·임계값·E 데이터 미변경 | fix/a-serving-run-id
 
 ---
 

@@ -37,11 +37,13 @@ _cache_lock = RLock()  # 첫 로딩과 승격 후 초기화가 겹쳐 이전 모
 class LoadedModel:
     """local .keras와 mlflow 두 소스를 동일한 인터페이스로 감싸는 래퍼."""
 
-    def __init__(self, keras_model, scaler: AirportScaler, version: str, registry_version: str | None = None):
+    def __init__(self, keras_model, scaler: AirportScaler, version: str,
+                 registry_version: str | None = None, run_id: str | None = None):
         self._keras_model = keras_model
         self.scaler = scaler
         self.version = version
         self.registry_version = registry_version
+        self.run_id = run_id  # C의 /monitor/versions가 실제 서빙 모델과 Registry를 비교할 때 사용
 
     def predict_one(self, sequence: list[dict]) -> float:
         """
@@ -73,11 +75,15 @@ def _load_from_mlflow() -> LoadedModel:
     versions = MlflowClient().get_latest_versions(model_name, stages=[stage])
     if not versions:
         raise RuntimeError(f"{model_name}에 {stage} 모델이 없습니다. 학습·게이트 통과 후 다시 시도하세요.")
-    registry_version = str(max(versions, key=lambda v: int(v.version)).version)
+    selected = max(versions, key=lambda v: int(v.version))
+    registry_version = str(selected.version)
     # 로딩 도중 Production이 바뀌더라도 보고한 번호와 실제 가중치는 같은 버전이어야 한다.
     keras_model = mlflow.tensorflow.load_model(f"{model_uri}/{registry_version}")
     scaler = AirportScaler.load(SCALER_PATH)  # Day1에서 fit한 고정 스케일러를 그대로 사용
-    return LoadedModel(keras_model, scaler, version="production", registry_version=registry_version)
+    return LoadedModel(
+        keras_model, scaler, version="production", registry_version=registry_version,
+        run_id=getattr(selected, "run_id", None),
+    )
 
 
 def _load_model() -> LoadedModel:
