@@ -7,21 +7,37 @@
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <style>
   :root {
-    --bg: #0a0c10;
-    --panel: #12151c;
-    --panel-2: #171b25;
-    --border: #262b38;
-    --text: #eef1f7;
-    --muted: #9aa4b8;
-    --faint: #5b6478;
-    --accent: #6c8dff;
-    --accent-soft: rgba(108, 141, 255, 0.16);
-    --ok: #3ddc97;
-    --ok-soft: rgba(61, 220, 151, 0.14);
-    --warn: #f5b64c;
-    --warn-soft: rgba(245, 182, 76, 0.14);
-    --err: #ff6b6b;
-    --err-soft: rgba(255, 107, 107, 0.14);
+    /* 라이트 테마. 글자 대비(흰 배경 기준): text 16.2:1, muted 6.6:1, faint 4.8:1, accent 6.5:1 */
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --panel-2: #f1f3f6;
+    --border: #d9dee6;
+    --text: #1b2030;
+    --muted: #545d6e;
+    --faint: #6b7385;
+    --accent: #3451d1;
+    --accent-2: #7b93ec;
+    --accent-soft: rgba(52, 81, 209, 0.10);
+    --on-accent: #ffffff;
+    --ok: #17703f;
+    --ok-soft: rgba(23, 112, 63, 0.10);
+    --warn: #9a5800;
+    --warn-soft: rgba(154, 88, 0, 0.12);
+    --err: #c62828;
+    --err-soft: rgba(198, 40, 40, 0.10);
+    --on-danger: #ffffff;
+    --border-soft: #eceef3;
+    --shadow: 0 1px 2px rgba(27, 32, 48, 0.04), 0 8px 24px rgba(27, 32, 48, 0.06);
+    /* 차트 색 (흰 배경 그래픽 대비: coral 3.5:1, indigo 4.9:1, teal 4.6:1) */
+    --chart-coral: #d9673f;
+    --chart-indigo: #5566d8;
+    --chart-teal: #2a8378;
+    --chart-grid: #e6e9ef;
+    --chart-track: #f0f2f7;
+    --series-actual: var(--chart-coral);
+    --series-pred: var(--chart-indigo);
+    --err-over: var(--chart-coral);   /* 실제 − 예측 > 0 (모델이 낮게 예측) */
+    --err-under: var(--chart-indigo); /* 실제 − 예측 < 0 (모델이 높게 예측) */
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, sans-serif;
   }
@@ -36,8 +52,8 @@
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand-mark {
     width: 34px; height: 34px; border-radius: 9px;
-    background: linear-gradient(135deg, var(--accent), #a9bdff);
-    display: flex; align-items: center; justify-content: center; color: #0a0c10;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: flex; align-items: center; justify-content: center; color: var(--on-accent);
     flex-shrink: 0;
   }
   .brand-text .title { font-weight: 700; font-size: 1.02rem; line-height: 1.2; }
@@ -56,8 +72,8 @@
   .page { max-width: 980px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 
   .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
-    padding: 18px 20px;
+    background: var(--panel); border: 1px solid var(--border-soft); border-radius: 18px;
+    padding: 20px 22px; box-shadow: var(--shadow);
   }
   .section-head { margin-bottom: 14px; }
   .section-head h2 { margin: 0 0 3px; font-size: 1.05rem; }
@@ -65,9 +81,9 @@
   .section-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
   .btn { border: none; border-radius: 9px; padding: 9px 14px; font-size: 0.83rem; font-weight: 700; cursor: pointer; }
-  .btn.primary { background: var(--accent); color: #0a0c10; }
+  .btn.primary { background: var(--accent); color: var(--on-accent); }
   .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
-  .btn.danger { background: var(--err); color: #1a0a0a; }
+  .btn.danger { background: var(--err); color: var(--on-danger); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
 
@@ -78,14 +94,14 @@
   .fc-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   .fc-trend { margin-top: 16px; }
   .fc-trend-title { font-size: 0.74rem; color: var(--muted); margin-bottom: 6px; }
-  .fc-bars { display: flex; align-items: flex-end; gap: 3px; height: 110px; }
+  .fc-bars { display: flex; align-items: flex-end; gap: 5px; height: 110px; }
   .fc-bar-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; min-width: 0; }
-  .fc-bar { background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; opacity: 0.75; }
-  .fc-bar-col:hover .fc-bar { opacity: 1; }
-  .fc-bar-col:last-child .fc-bar { opacity: 1; }
-  .fc-labels { display: flex; gap: 3px; margin-top: 4px; }
+  .fc-bar { background: var(--chart-indigo); border-radius: 6px; min-height: 4px; opacity: 0.35; transition: opacity 0.15s; }
+  .fc-bar-col:hover .fc-bar { opacity: 0.85; }
+  .fc-bar-col:last-child .fc-bar { background: var(--chart-coral); opacity: 1; }
+  .fc-labels { display: flex; gap: 5px; margin-top: 4px; }
   .fc-label { flex: 1; min-width: 0; text-align: center; font-size: 0.6rem; color: var(--faint); font-family: var(--mono); overflow: hidden; white-space: nowrap; }
-  .fc-hover { font-size: 0.74rem; color: var(--muted); margin-top: 6px; font-family: var(--mono); min-height: 1.1em; }
+  .fc-hover { font-size: 0.74rem; color: var(--muted); margin-top: 6px; min-height: 1.1em; font-variant-numeric: tabular-nums; }
 
   /* ---------- Upload ---------- */
   .upload-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -130,7 +146,7 @@
 <div class="topnav">
   <div class="brand">
     <div class="brand-mark">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-10 2 3h5" stroke="#0a0c10" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2 12h4l2-7 4 14 3-10 2 3h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
     <div class="brand-text">
       <div class="title">AIOps · 공항 도착 여객 예측</div>
