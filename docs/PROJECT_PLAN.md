@@ -101,13 +101,15 @@ fine-tuning → 재배포가 한 줄로 이어지는 AIOps 파이프라인을 �
 
 같은 파일을 두 사람이 동시에 고치지 않도록 **파일 단위로 소유자**를 둡니다. 이름은 팀 회의에서 채워 넣으세요.
 
-| 역할 | 담당 | 담당 파일 | Sprint 1 할 일 |
-|---|---|---|---|
-| 기획·데이터 | ❓ | `docs/`, `data/` | 게이트 2,700·드리프트 σ 재검토(실측 기반), 혼잡 등급 경계(Q1 34,962 / Q3 40,177) 확정, 기획서 ①②③ |
-| 서빙 API | ❓ | `serving_app/model_loader.py`, `routers/predict.py`, `schemas.py` | `_load_from_mlflow()`, `batch_test()` 이식, `/monitor/versions` 설계 |
-| 배포 | ❓ | `serving_app/Dockerfile`, `docker-compose.yml`, `train_and_register.py` | 실데이터로 게이트 통과 확인, 컨테이너 빌드·실행 스냅샷 |
-| 모니터링 | ❓ | `serving_app/monitoring/*`, `scripts/simulate_drift.py` | `compute_rmse()`, `check_and_trigger()`, `send_batch()` 이식, 임계값 검증 |
-| 대시보드 | ❓ | `serving_app/static/index.html` | Sprint 2: 예측 카드 + Production 버전 표기 |
+| 코드 | 역할 | 담당 (이름) | 담당 파일 | Sprint 1 할 일 |
+|---|---|---|---|---|
+| E | 기획·데이터·통합 | ❓ | `docs/`, `data/`, `CLAUDE.md` 상수 표 | 게이트·드리프트 기준 재검토(실측 기반, `exp/*` 브랜치), 혼잡 등급 경계(Q1 34,962 / Q3 40,177) 확정, 기획서 ①②③, 0번 표 |
+| A | 서빙 API | ❓ | `serving_app/model_loader.py`, `routers/predict.py`의 `predict()`, `schemas.py` | `_load_from_mlflow()` 이식, 승격 후 캐시 갱신(`reset_cache`), `/predict` 응답 시간 측정 |
+| C | 학습·배포·버전 조회 | ❓ | `serving_app/train_and_register.py`, `routers/data.py`, `Dockerfile`, `docker-compose.yml` | 실데이터로 게이트 통과 확인, `/data/status` `recent`, `/monitor/versions`, 컨테이너 빌드·실행 스냅샷 |
+| B | 모니터링·AIOps | ❓ | `serving_app/monitoring/*`, `routers/predict.py`의 `batch_test()`, `scripts/simulate_drift.py` | `compute_rmse()`, `batch_test()`, `check_and_trigger()`, `send_batch()` 이식, 시연 순서 팀 PC 재현 |
+| D1 / D2 | 대시보드 | ❓ / ❓ | `serving_app/static/index.html` (D1 예측 카드·등급 / D2 배치 전송·버전·로그) | Sprint 2: 예측 카드 + Production 버전 표기 + `drift_check.status` 색 구분 |
+
+코드(A~E)는 `CLAUDE.md` "작업자 코드" 표와 `docs/code_current.md` 섹션 번호와 같다. Claude Code에 "나 B야"라고 하면 이 표로 해석한다.
 
 ## 7. 리스크 및 메모
 
